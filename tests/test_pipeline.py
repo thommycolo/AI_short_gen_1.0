@@ -134,7 +134,7 @@ class TestAIShortGenerator(unittest.TestCase):
         self.assertIn("TitleBanner", content)
         self.assertIn("KaraokeWord", content)
         self.assertIn("Black Holes", content)
-        self.assertIn("Subscribe for part.2", content)
+        self.assertIn("Follow for part.2", content)
         self.assertNotIn("{\\c&H", content) # Nessuna evidenziazione parole
         print("[OK] test_04_subtitle_generator_colors_and_ass PASSED")
 

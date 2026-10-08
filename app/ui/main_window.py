@@ -18,7 +18,8 @@ from PySide6.QtGui import QKeySequence, QShortcut
 
 from app.config import (
     RENDERS_DIR, CATEGORIES, DEFAULT_WPS, TOTAL_PADDING_SEC,
-    VRAM_APP_NET_BUDGET_MB, VRAM_MAX_CEILING_MB, CACHE_DIR
+    VRAM_APP_NET_BUDGET_MB, VRAM_MAX_CEILING_MB, CACHE_DIR,
+    DEFAULT_OUTRO_CTA_FINAL
 )
 from app.core.script_manager import ScriptRepository
 from app.core.continuous_video_manager import ContinuousVideoPoolManager
@@ -721,7 +722,7 @@ class MainWindow(QMainWindow):
             source_video_title=best_title,
             video_time_interval=f"00:00.0 -> {est_video:.1f}s",
             intro_banner_text=f"{title} part.1",
-            outro_cta_text="Subscribe for more!",
+            outro_cta_text=DEFAULT_OUTRO_CTA_FINAL,
             bgm_title="Safe BGM (-24 LUFS)" if self.active_bgm_config.get("bgm_track_id") else "Nessuna BGM (Voice Only)",
             font_name=self.active_subtitle_config.get("font_name", "Montserrat Black"),
             composite_frame_path=comp_frame,
@@ -808,7 +809,7 @@ class MainWindow(QMainWindow):
                 source_video_title=best_title,
                 video_time_interval=f"00:00.0 -> {est_video:.1f}s",
                 intro_banner_text=f"{title} part.1",
-                outro_cta_text="Subscribe for more!",
+                outro_cta_text=DEFAULT_OUTRO_CTA_FINAL,
                 bgm_title="Safe BGM (-24 LUFS)" if b_cfg.get("bgm_track_id") else "Nessuna BGM (Voice Only)",
                 font_name=s_cfg.get("font_name", "Montserrat Black"),
                 composite_frame_path=comp_frame,

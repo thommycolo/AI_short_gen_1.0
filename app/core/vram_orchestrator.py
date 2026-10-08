@@ -9,11 +9,11 @@ import subprocess
 import multiprocessing
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from app.config import (
     CACHE_DIR, RENDERS_DIR, PADDING_INTRO_SEC, PADDING_OUTRO_SEC,
-    PADDING_TOTAL_SEC, VRAM_APP_NET_BUDGET_MB, VRAM_MAX_CEILING_MB
+    PADDING_TOTAL_SEC, OUTRO_PAUSE_SEC, VRAM_APP_NET_BUDGET_MB, VRAM_MAX_CEILING_MB
 )
 from app.core.tts_engine import Qwen3VoiceSuite
 from app.core.discourse_chunker import DiscourseCoherenceChunker
@@ -42,16 +42,34 @@ def _tts_worker_proc(task_data: dict, result_queue: multiprocessing.Queue):
         speaker = task_data.get("speaker", "Ryan")
         instruct = task_data.get("instruct", "")
         speed = float(task_data.get("speed", 1.0))
+        outro_text = task_data.get("outro_text", "")
+        outro_wav = task_data.get("outro_wav", "")
 
         suite = Qwen3VoiceSuite()
-        measured_dur = suite.generate_custom(
+        measured_narr_dur = suite.generate_custom(
             text=text,
             output_path=out_wav,
             speaker=speaker,
             instruct=instruct,
             speed=speed
         )
-        result_queue.put({"success": True, "duration": measured_dur})
+
+        measured_outro_dur = 0.0
+        if outro_text and outro_wav:
+            measured_outro_dur = suite.generate_custom(
+                text=outro_text,
+                output_path=outro_wav,
+                speaker=speaker,
+                instruct=instruct,
+                speed=speed
+            )
+
+        result_queue.put({
+            "success": True,
+            "duration": measured_narr_dur,
+            "narration_duration": measured_narr_dur,
+            "outro_duration": measured_outro_dur
+        })
     except Exception as e:
         result_queue.put({"success": False, "error": str(e)})
 
@@ -156,7 +174,15 @@ class VRAMLifecycleOrchestrator:
         self.thumb_gen = StorySeriesThumbnailGenerator()
         self.compositor = VideoCompositor()
 
-    def run_phase_a_tts_isolated(self, text: str, output_wav: str, voice_cfg: dict, speed: float = 1.0) -> float:
+    def run_phase_a_tts_isolated(
+        self,
+        text: str,
+        output_wav: str,
+        voice_cfg: dict,
+        speed: float = 1.0,
+        outro_text: Optional[str] = None,
+        outro_wav: Optional[str] = None
+    ) -> Tuple[float, float]:
         """Esegue la sintesi vocale in un processo subprocess separato per bonifica totale WDDM."""
         ctx = multiprocessing.get_context("spawn")
         q = ctx.Queue()
@@ -165,7 +191,9 @@ class VRAMLifecycleOrchestrator:
             "output_wav": output_wav,
             "speaker": voice_cfg.get("speaker", "Ryan"),
             "instruct": voice_cfg.get("instruct", ""),
-            "speed": speed
+            "speed": speed,
+            "outro_text": outro_text or "",
+            "outro_wav": outro_wav or ""
         }
 
         p = ctx.Process(target=_tts_worker_proc, args=(task, q))
@@ -183,7 +211,9 @@ class VRAMLifecycleOrchestrator:
         if not res["success"]:
             raise RuntimeError(f"Errore worker TTS: {res.get('error')}")
 
-        return float(res["duration"])
+        narr_dur = float(res.get("narration_duration", res.get("duration", 0.0)))
+        outro_dur = float(res.get("outro_duration", 0.0))
+        return narr_dur, outro_dur
 
     def run_phase_b_whisper_isolated(self, audio_wav: str, text: str, duration: float) -> List[Dict[str, Any]]:
         """Esegue l'allineamento Whisper in un processo subprocess separato su GPU pulita."""
@@ -274,17 +304,43 @@ class VRAMLifecycleOrchestrator:
                 if on_step_progress:
                     on_step_progress(part_num, "Sintesi Vocale Qwen3-TTS", 10.0)
 
-                temp_wav = str(CACHE_DIR / f"temp_voice_{story_id}_p{part_num}.wav")
-                audio_dur = self.run_phase_a_tts_isolated(part_text, temp_wav, voice_cfg, speed=speed)
+                # Definizione testo finale (Outro CTA letto da TTS)
+                if part_num < total_parts:
+                    outro_spoken = f"Follow for part {part_num + 1}."
+                    outro_banner = f"Follow for part.{part_num + 1}"
+                else:
+                    outro_spoken = "Follow for more."
+                    outro_banner = "Follow for more!"
 
-                # Calcolo Ground Truth Temporale
-                video_needed_dur = audio_dur + PADDING_TOTAL_SEC # +2.0s
+                temp_narr_wav = str(CACHE_DIR / f"temp_voice_{story_id}_p{part_num}_narr.wav")
+                temp_outro_wav = str(CACHE_DIR / f"temp_voice_{story_id}_p{part_num}_outro.wav")
+                temp_combined_wav = str(CACHE_DIR / f"temp_voice_{story_id}_p{part_num}.wav")
+
+                narr_dur, outro_dur = self.run_phase_a_tts_isolated(
+                    text=part_text,
+                    output_wav=temp_narr_wav,
+                    voice_cfg=voice_cfg,
+                    speed=speed,
+                    outro_text=outro_spoken,
+                    outro_wav=temp_outro_wav
+                )
+
+                # Unione: narrazione + 1.0s di pausa/silenzio + outro letto dal TTS
+                total_voice_dur, narr_dur, outro_dur = SileroVADSilenceTrimmer.stitch_narration_and_outro(
+                    narration_wav_path=temp_narr_wav,
+                    outro_wav_path=temp_outro_wav,
+                    output_combined_path=temp_combined_wav,
+                    pause_sec=OUTRO_PAUSE_SEC
+                )
+
+                # Calcolo Ground Truth Temporale (Intro 1.0s + Voce Totale + Outro 1.0s)
+                video_needed_dur = total_voice_dur + PADDING_INTRO_SEC + PADDING_OUTRO_SEC
 
                 if on_step_progress:
                     on_step_progress(part_num, "Allineamento Sottotitoli Whisper", 35.0)
 
-                # --- FASE 2: ALLINEAMENTO WHISPER & ASS SUBTITLES ---
-                word_events = self.run_phase_b_whisper_isolated(temp_wav, part_text, audio_dur)
+                # --- FASE 2: ALLINEAMENTO WHISPER SULLA NARRAZIONE & ASS SUBTITLES ---
+                word_events = self.run_phase_b_whisper_isolated(temp_narr_wav, part_text, narr_dur)
 
                 ass_path = str(CACHE_DIR / f"temp_subs_{story_id}_p{part_num}.ass")
                 self.subtitle_gen.generate_ass(
@@ -294,7 +350,9 @@ class VRAMLifecycleOrchestrator:
                     part_num=part_num,
                     total_parts=total_parts,
                     total_video_duration=video_needed_dur,
-                    style_config=sub_cfg
+                    style_config=sub_cfg,
+                    narration_duration=narr_dur,
+                    outro_cta_text=outro_banner
                 )
 
                 if on_step_progress:
@@ -340,9 +398,9 @@ class VRAMLifecycleOrchestrator:
 
                 final_audio_wav = str(CACHE_DIR / f"temp_master_audio_{story_id}_p{part_num}.wav")
                 self.bgm_manager.mix_narration_and_bgm_ducking(
-                    voice_wav_path=temp_wav,
+                    voice_wav_path=temp_combined_wav,
                     bgm_wav_path=bgm_track_path,
-                    voice_duration_sec=audio_dur,
+                    voice_duration_sec=total_voice_dur,
                     output_mixed_audio=final_audio_wav,
                     ducking_db=bgm_cfg.get("ducking_db", bgm_cfg.get("voice_duck_db", -22.0)),
                     intro_outro_db=bgm_cfg.get("intro_outro_db", bgm_cfg.get("intro_outro_duck_db", -14.0))

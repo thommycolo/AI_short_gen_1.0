@@ -15,7 +15,7 @@ from app.config import (
     DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
     DEFAULT_HIGHLIGHT_COLOR, DEFAULT_OUTLINE_COLOR, DEFAULT_OUTLINE_WIDTH,
     DEFAULT_SHADOW_RADIUS, PADDING_INTRO_SEC, PADDING_OUTRO_SEC,
-    INTRO_BANNER_START_SEC, INTRO_BANNER_END_SEC, OUTRO_CTA_LEAD_TIME_SEC,
+    OUTRO_PAUSE_SEC, INTRO_BANNER_START_SEC, INTRO_BANNER_END_SEC, OUTRO_CTA_LEAD_TIME_SEC,
     FONTS_DIR
 )
 
@@ -141,7 +141,9 @@ class SubtitleGenerator:
         part_num: int = 1,
         total_parts: int = 1,
         total_video_duration: Optional[float] = None,
-        style_config: Optional[dict] = None
+        style_config: Optional[dict] = None,
+        narration_duration: Optional[float] = None,
+        outro_cta_text: Optional[str] = None
     ) -> str:
         """
         Genera il file .ass completo per il montaggio finale:
@@ -171,9 +173,17 @@ class SubtitleGenerator:
         elif not total_video_duration:
             total_video_duration = 38.0
 
-        cta_start_sec = max(0.0, total_video_duration - OUTRO_CTA_LEAD_TIME_SEC)
+        if narration_duration is not None:
+            cta_start_sec = PADDING_INTRO_SEC + narration_duration + OUTRO_PAUSE_SEC
+        elif word_events:
+            last_end = max(w["end"] for w in word_events)
+            cta_start_sec = PADDING_INTRO_SEC + last_end + OUTRO_PAUSE_SEC
+        else:
+            cta_start_sec = max(0.0, total_video_duration - OUTRO_CTA_LEAD_TIME_SEC)
+
         intro_title_text = f"{context_title.replace('_', ' ')} part.{part_num}"
-        outro_cta_text = f"Subscribe for part.{part_num + 1}" if part_num < total_parts else "Subscribe for more!"
+        if outro_cta_text is None:
+            outro_cta_text = f"Follow for part.{part_num + 1}" if part_num < total_parts else "Follow for more!"
 
         ass_lines = [
             "[Script Info]",
@@ -213,7 +223,7 @@ class SubtitleGenerator:
                 f"Dialogue: 0,{format_ass_time(chunk_start)},{format_ass_time(chunk_end)},KaraokeWord,,0,0,0,,{formatted_text}"
             )
 
-        # Outro CTA Banner (T_video - 1.0s -> T_video)
+        # Outro CTA Banner (entra esattamente a 1s dalla fine della narrazione assieme all'audio letto dal TTS)
         ass_lines.append(
             f"Dialogue: 1,{format_ass_time(cta_start_sec)},{format_ass_time(total_video_duration)},OutroBanner,,0,0,0,,{{\\fade(150,0)}}{outro_cta_text}"
         )

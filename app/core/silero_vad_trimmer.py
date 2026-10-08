@@ -107,16 +107,68 @@ class SileroVADSilenceTrimmer:
                     start_index = max(0, i - int(0.03 * sr))
                     break
         else:
-            # Fallback robusto su energia con margine morbido di 40ms (anti-clipping consonanti soft)
-            frame_size = max(1, sr // 100)
-            threshold = 0.005 # Livello soft
-            for i in range(0, len(mono) - frame_size, frame_size):
-                frame_rms = np.sqrt(np.mean(mono[i:i + frame_size] ** 2))
-                if frame_rms > threshold:
-                    start_index = max(0, i - int(0.04 * sr))
-                    break
+            # Fallback robusto su energia con persistenza a finestra temporale (ignora click isolati <50ms)
+            frame_size = max(1, sr // 50)  # Finestra 20ms
+            window_frames = 4              # 80ms di energia vocale sostenuta
+            num_frames = len(mono) // frame_size
+            if num_frames > window_frames:
+                rms_arr = np.array([np.sqrt(np.mean(mono[i*frame_size:(i+1)*frame_size] ** 2)) for i in range(num_frames)])
+                threshold = 0.015 # Soglia di attivazione vocale reale
+                for i in range(num_frames - window_frames):
+                    if np.mean(rms_arr[i:i+window_frames]) > threshold:
+                        start_index = max(0, i * frame_size - int(0.04 * sr))
+                        break
 
         trimmed_data = data[start_index:]
         cls._write_wav(output_wav_path, trimmed_data, sr)
-        return len(trimmed_data) / sr
+        return float(len(trimmed_data) / sr)
+
+    @classmethod
+    def stitch_narration_and_outro(
+        cls,
+        narration_wav_path: str,
+        outro_wav_path: Optional[str],
+        output_combined_path: str,
+        pause_sec: float = 1.000
+    ) -> tuple:
+        """
+        Concatena l'audio della narrazione, esattamente 1.0s di silenzio, e l'audio dell'outro letto dal TTS.
+        Ritorna (durata_totale, durata_narrazione, durata_outro).
+        """
+        # 1. Trimming e lettura narrazione
+        narr_temp = str(Path(output_combined_path).parent / "temp_trimmed_narr.wav")
+        narr_dur = cls.trim_leading_silence(narration_wav_path, narr_temp)
+        narr_data, sr = cls._read_wav(narr_temp)
+
+        if not outro_wav_path or not Path(outro_wav_path).exists():
+            cls._write_wav(output_combined_path, narr_data, sr)
+            return (narr_dur, narr_dur, 0.0)
+
+        # 2. Trimming e lettura outro
+        outro_temp = str(Path(output_combined_path).parent / "temp_trimmed_outro.wav")
+        outro_dur = cls.trim_leading_silence(outro_wav_path, outro_temp)
+        outro_data, outro_sr = cls._read_wav(outro_temp)
+
+        if outro_sr != sr:
+            # Resampling semplice se necessario
+            import librosa
+            if outro_data.ndim > 1:
+                outro_data = librosa.resample(outro_data.T, orig_sr=outro_sr, target_sr=sr).T
+            else:
+                outro_data = librosa.resample(outro_data, orig_sr=outro_sr, target_sr=sr)
+
+        # 3. Pausa di silenzio esatta (1.0s)
+        pause_samples = int(pause_sec * sr)
+        if narr_data.ndim > 1:
+            pause_data = np.zeros((pause_samples, narr_data.shape[1]), dtype=narr_data.dtype)
+        else:
+            pause_data = np.zeros(pause_samples, dtype=narr_data.dtype)
+
+        # 4. Concatenazione finale
+        combined = np.concatenate([narr_data, pause_data, outro_data])
+        cls._write_wav(output_combined_path, combined, sr)
+        total_dur = float(len(combined) / sr)
+
+        return (total_dur, narr_dur, outro_dur)
+
 

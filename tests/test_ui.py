@@ -75,7 +75,7 @@ class TestUIComponents(unittest.TestCase):
             source_video_title="Master.mp4",
             video_time_interval="00:00-00:22",
             intro_banner_text="Test part.1",
-            outro_cta_text="Subscribe!",
+            outro_cta_text="Follow for more!",
             bgm_title="BGM",
             font_name="Montserrat Black",
             composite_frame_path="",

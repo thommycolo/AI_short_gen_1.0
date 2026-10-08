@@ -114,7 +114,7 @@ class PreProductionReviewEngine:
             tot_video_dur = est_audio_dur + (PADDING_INTRO_SEC + PADDING_OUTRO_SEC)
 
             intro_text = f"{title.replace('_', ' ')} part.{part_num}"
-            outro_text = f"Subscribe for part.{part_num + 1}" if part_num < total_parts else "Subscribe for more!"
+            outro_text = f"Follow for part.{part_num + 1}" if part_num < total_parts else "Follow for more!"
 
             # Generazione ASS temporaneo per il frame a 0.60s
             ass_path = self._generate_temp_review_ass(story_id, title, part_num, text, sub_cfg)
@@ -230,10 +230,10 @@ Style: SubtitleWord,{font_name},{font_size},{primary_ass},{primary_ass},{outline
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-; Intro Title Banner al centro (0.0s -> 1.50s)
-Dialogue: 1,0:00:00.00,0:00:01.50,TitleBanner,,0,0,0,,{{\\fade(150,200)}}{intro_banner_text}
-; Sottotitolo uniforme senza evidenziazione (0.50s -> 1.50s)
-Dialogue: 0,0:00:00.50,0:00:01.50,SubtitleWord,,0,0,0,,{first_word} {other_words}
+; Intro Title Banner al centro (0.0s -> 1.00s)
+Dialogue: 1,0:00:00.00,0:00:01.00,TitleBanner,,0,0,0,,{{\\fade(150,200)}}{intro_banner_text}
+; Sottotitolo uniforme senza evidenziazione (1.00s -> 2.00s)
+Dialogue: 0,0:00:01.00,0:00:02.00,SubtitleWord,,0,0,0,,{first_word} {other_words}
 """
         ass_path.write_text(ass_content, encoding="utf-8")
         return ass_path

@@ -80,9 +80,11 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 # --- METRICHE TEMPORALI & SPEECH UNIFICATO ---
 DEFAULT_WPS = 2.50               # 150 WPM / 60 secondi = 2.50 parole/sec (American English)
-PADDING_INTRO_SEC = 0.500        # Anticipo video lead-in prima dell'inizio voce
-PADDING_OUTRO_SEC = 1.500        # Coda video dopo stacco voce
-PADDING_TOTAL_SEC = PADDING_INTRO_SEC + PADDING_OUTRO_SEC # 2.000s esatti
+PADDING_INTRO_SEC = 1.000        # Anticipo video lead-in prima dell'inizio voce (esattamente 1.0s)
+OUTRO_PAUSE_SEC = 1.000          # Pausa di silenzio prima dell'outro CTA letto dal TTS (esattamente 1.0s)
+OUTRO_TAIL_SEC = 0.500           # Coda finale video dopo la lettura dell'outro
+PADDING_OUTRO_SEC = 1.000        # Coda video base compatibilità
+PADDING_TOTAL_SEC = PADDING_INTRO_SEC + PADDING_OUTRO_SEC # 2.000s compatibilità base
 
 TARGET_VIDEO_MAX_SEC = 45.0      # Durata massima reel video
 AUDIO_MAX_SEC = TARGET_VIDEO_MAX_SEC - PADDING_TOTAL_SEC  # 43.0s
@@ -95,9 +97,11 @@ MAX_REEL_AUDIO_SEC = MAX_REEL_VIDEO_SEC - PADDING_TOTAL_SEC # 43.0s
 
 # --- TIMING BANNER & REVISIONI ---
 INTRO_BANNER_START_SEC = 0.000
-INTRO_BANNER_END_SEC = 1.500
-OUTRO_CTA_LEAD_TIME_SEC = 1.000  # CTA entra esattamente a T_video - 1.000s
-REVIEW_FRAME_TIMESTAMP_SEC = 0.600 # Campionamento a t = 0.600s (+100ms su inizio voce)
+INTRO_BANNER_END_SEC = 1.000     # Il titolo iniziale scompare esattamente quando entra la voce a 1.0s
+OUTRO_CTA_LEAD_TIME_SEC = 1.000  # CTA entra esattamente con l'outro
+REVIEW_FRAME_TIMESTAMP_SEC = 1.100 # Campionamento a t = 1.100s (+100ms su inizio voce)
+DEFAULT_OUTRO_CTA_TEMPLATE = "Follow for part.{part_num}"
+DEFAULT_OUTRO_CTA_FINAL = "Follow for more!"
 
 # --- DIMENSIONI VIDEO & TIPOGRAFIA (9:16) ---
 CANVAS_WIDTH = 1080

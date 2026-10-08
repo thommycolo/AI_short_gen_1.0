@@ -198,10 +198,11 @@ class BgmManager:
 
         total_dur = voice_duration_sec + (PADDING_INTRO_SEC + PADDING_OUTRO_SEC)
 
+        delay_ms = int(PADDING_INTRO_SEC * 1000)
         # Caso 1: Nessuna Musica (Ottimizzato per Trend Sound Social)
         if not bgm_wav_path or not os.path.exists(bgm_wav_path):
             filter_chain = (
-                f"[0:a]adelay=500|500,atrim=0:{total_dur:.3f},apad=whole_dur={total_dur:.3f},"
+                f"[0:a]adelay={delay_ms}|{delay_ms},atrim=0:{total_dur:.3f},apad=whole_dur={total_dur:.3f},"
                 f"alimiter=limit={TRUE_PEAK_LIMITER_DB}dB:attack=5:release=50:asc=1[out]"
             )
             cmd = [
@@ -233,7 +234,7 @@ class BgmManager:
         )
 
         filter_complex = (
-            f"[0:a]adelay=500|500,apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f}[voice]; "
+            f"[0:a]adelay={delay_ms}|{delay_ms},apad=whole_dur={total_dur:.3f},atrim=0:{total_dur:.3f}[voice]; "
             f"[1:a]atrim=0:{total_dur:.3f},{volume_expr}[bgm]; "
             f"[voice][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed]; "
             f"[mixed]alimiter=limit={TRUE_PEAK_LIMITER_DB}dB:attack=5:release=50:asc=1[out]"
