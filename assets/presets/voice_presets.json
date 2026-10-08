@@ -1,0 +1,42 @@
+[
+  {
+    "preset_name": "US_ViralHook_Ryan",
+    "language": "English",
+    "speaker_or_profile": "Ryan",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "High energy viral creator voice, fast paced, emphasizing keywords",
+    "speed_rate": 1.00,
+    "pitch": 0.0,
+    "temperature": 0.70
+  },
+  {
+    "preset_name": "US_DarkMystery_Ryan",
+    "language": "English",
+    "speaker_or_profile": "Ryan",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Deep mysterious tone, suspenseful micro-pauses, slow build",
+    "speed_rate": 0.95,
+    "pitch": -1.0,
+    "temperature": 0.65
+  },
+  {
+    "preset_name": "US_TechScience_Aiden",
+    "language": "English",
+    "speaker_or_profile": "Aiden",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Fast-paced, crystal clear American diction, confident",
+    "speed_rate": 1.10,
+    "pitch": 0.0,
+    "temperature": 0.70
+  },
+  {
+    "preset_name": "US_Inspiring_Vivian",
+    "language": "English",
+    "speaker_or_profile": "Vivian",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Passionate, confident, cinematic and motivational storytelling",
+    "speed_rate": 1.00,
+    "pitch": 0.5,
+    "temperature": 0.75
+  }
+]

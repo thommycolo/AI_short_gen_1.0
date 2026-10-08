@@ -1,0 +1,54 @@
+[
+  {
+    "preset_name": "Viral_Pop_Gold",
+    "font_name": "Montserrat Black",
+    "font_size": 68,
+    "is_all_caps": 1,
+    "animation_style": "WORD_POP",
+    "primary_color_hex": "#DCE0EA",
+    "highlight_color_hex": "#BFA175",
+    "outline_color_hex": "#181A20",
+    "outline_width": 5,
+    "shadow_radius": 3,
+    "margin_v": 440
+  },
+  {
+    "preset_name": "Bold_Minimal_White",
+    "font_name": "Anton",
+    "font_size": 72,
+    "is_all_caps": 1,
+    "animation_style": "STATIC",
+    "primary_color_hex": "#FFFFFF",
+    "highlight_color_hex": "#DCE0EA",
+    "outline_color_hex": "#181A20",
+    "outline_width": 6,
+    "shadow_radius": 4,
+    "margin_v": 440
+  },
+  {
+    "preset_name": "Electric_Cyan_Glow",
+    "font_name": "Montserrat Black",
+    "font_size": 66,
+    "is_all_caps": 1,
+    "animation_style": "WORD_POP",
+    "primary_color_hex": "#DCE0EA",
+    "highlight_color_hex": "#6B82A6",
+    "outline_color_hex": "#181A20",
+    "outline_width": 5,
+    "shadow_radius": 4,
+    "margin_v": 420
+  },
+  {
+    "preset_name": "Cinematic_Warm",
+    "font_name": "Montserrat Black",
+    "font_size": 68,
+    "is_all_caps": 1,
+    "animation_style": "WORD_POP",
+    "primary_color_hex": "#E8E5DF",
+    "highlight_color_hex": "#C4A36B",
+    "outline_color_hex": "#1A1816",
+    "outline_width": 5,
+    "shadow_radius": 3,
+    "margin_v": 460
+  }
+]

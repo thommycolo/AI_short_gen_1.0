@@ -1,0 +1,20 @@
+# Dipendenze core per AI Short Generator 1.0 (Windows Desktop Standalone)
+torch>=2.5.1
+torchaudio>=2.5.1
+torchao>=0.6.0
+accelerate>=0.28.0
+qwen-tts>=0.1.0
+faster-whisper>=1.0.3
+inflect>=7.0.0
+yt-dlp>=2024.10.0
+yt-dlp-ejs>=0.8.0
+soundfile>=0.12.1
+librosa>=0.10.2
+numpy>=1.26.0
+scipy>=1.13.0
+PySide6>=6.7.0
+requests>=2.31.0
+spacy>=3.7.0
+onnxruntime>=1.17.0
+Pillow>=10.0.0
+pyinstaller>=6.5.0
