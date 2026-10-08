@@ -13,6 +13,7 @@ class ScriptSelectorCard(QFrame):
 
     new_script_requested = Signal()
     library_requested = Signal()
+    clip_split_requested = Signal()
     clear_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None):
@@ -37,10 +38,16 @@ class ScriptSelectorCard(QFrame):
         self.btn_library = QPushButton("📂 Scegli dall'Archivio")
         self.btn_library.clicked.connect(self.library_requested.emit)
 
+        self.btn_clip_split = QPushButton("✂️ Suddivisione Clip & Parametri")
+        self.btn_clip_split.setStyleSheet("font-weight: 600; color: #E2E6EF;")
+        self.btn_clip_split.setToolTip("Analizza la suddivisione del testo nelle varie clip e regola dinamicamente i parametri temporali")
+        self.btn_clip_split.clicked.connect(self.clip_split_requested.emit)
+
         top_row.addWidget(header_lbl)
         top_row.addStretch()
         top_row.addWidget(self.btn_new)
         top_row.addWidget(self.btn_library)
+        top_row.addWidget(self.btn_clip_split)
         layout.addLayout(top_row)
 
         # Box informazioni script attivo
@@ -69,10 +76,16 @@ class ScriptSelectorCard(QFrame):
         self.lbl_metrics = QLabel("Dati: 0 Words | Stima: ~0.0 s | 0 Clip Short")
         self.lbl_metrics.setObjectName("HelperText")
 
+        self.btn_mini_split = QPushButton("✂️ Dettaglio Clip")
+        self.btn_mini_split.setStyleSheet("font-size: 10px; padding: 2px 7px; color: #BFA175;")
+        self.btn_mini_split.setVisible(False)
+        self.btn_mini_split.clicked.connect(self.clip_split_requested.emit)
+
         self.lbl_status = QLabel("IN ATTESA")
         self.lbl_status.setObjectName("BadgeUsedLock")
 
         metrics_row.addWidget(self.lbl_metrics)
+        metrics_row.addWidget(self.btn_mini_split)
         metrics_row.addStretch()
         metrics_row.addWidget(self.lbl_status)
         info_layout.addLayout(metrics_row)
@@ -86,8 +99,13 @@ class ScriptSelectorCard(QFrame):
         est_sec = script_data.get("est_duration_sec", round(word_count / DEFAULT_WPS, 1))
         status = script_data.get("status", "DISPONIBILE")
 
-        # Stima clip (max ~43s audio per clip)
-        num_clips = max(1, int(round(est_sec / 40.0 + 0.49)))
+        # Stima o conteggio reale clip
+        if "num_clips" in script_data and script_data["num_clips"]:
+            num_clips = int(script_data["num_clips"])
+        elif script_data.get("custom_chunks"):
+            num_clips = len(script_data["custom_chunks"])
+        else:
+            num_clips = max(1, int(round(est_sec / 40.0 + 0.49)))
 
         self.lbl_title.setText(f'Titolo: "{title}"')
         self.lbl_metrics.setText(f"Dati: {word_count} Words | Stima: ~{est_sec:.1f} s | {num_clips} Clip Short")
@@ -107,6 +125,47 @@ class ScriptSelectorCard(QFrame):
         self.lbl_status.style().polish(self.lbl_status)
 
         self.btn_clear.setVisible(True)
+        self.btn_mini_split.setVisible(True)
+
+    def update_metrics(
+        self,
+        wps: float = DEFAULT_WPS,
+        num_clips: Optional[int] = None,
+        total_duration_sec: Optional[float] = None,
+        word_count: Optional[int] = None,
+        char_count: Optional[int] = None
+    ):
+        """Aggiorna le metriche mostrate in base alla nuova velocità WPS e suddivisione clip."""
+        if not self.active_script_data:
+            return
+        if word_count is not None:
+            self.active_script_data["word_count"] = word_count
+        if char_count is not None:
+            self.active_script_data["char_count"] = char_count
+        if total_duration_sec is not None:
+            self.active_script_data["est_duration_sec"] = total_duration_sec
+        if num_clips is not None:
+            self.active_script_data["num_clips"] = num_clips
+
+        wc = self.active_script_data.get("word_count", 0)
+
+        if total_duration_sec is not None:
+            est_sec = float(total_duration_sec)
+        elif "est_duration_sec" in self.active_script_data:
+            est_sec = float(self.active_script_data["est_duration_sec"])
+        else:
+            est_sec = round(wc / max(0.5, wps), 1)
+
+        if num_clips is not None:
+            clips = int(num_clips)
+        elif "num_clips" in self.active_script_data:
+            clips = int(self.active_script_data["num_clips"])
+        elif self.active_script_data.get("custom_chunks"):
+            clips = len(self.active_script_data["custom_chunks"])
+        else:
+            clips = max(1, int(round(est_sec / 40.0 + 0.49)))
+
+        self.lbl_metrics.setText(f"Dati: {wc} Words | Stima: ~{est_sec:.1f} s | {clips} Clip Short")
 
     def clear_script(self, notify: bool = True):
         if self.active_script_data is None and not self.btn_clear.isVisible():
@@ -119,6 +178,7 @@ class ScriptSelectorCard(QFrame):
         self.lbl_status.style().unpolish(self.lbl_status)
         self.lbl_status.style().polish(self.lbl_status)
         self.btn_clear.setVisible(False)
+        self.btn_mini_split.setVisible(False)
         if notify:
             self.clear_requested.emit()
 

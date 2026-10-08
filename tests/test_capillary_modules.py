@@ -391,11 +391,31 @@ class TestCapillaryModules(unittest.TestCase):
             story_id=888,
             context_title="Interstellar Comet",
             text=dummy_script["raw_text"],
-            category="General"
+            category="General",
+            timing_config={
+                "target_video_max": 30.0,
+                "allowed_delta_sec": 5.0,
+                "wps": 2.65,
+                "padding_intro_sec": 0.8,
+                "padding_outro_sec": 0.8,
+                "outro_pause_sec": 0.8
+            }
         )
         win._pending_jobs = [test_job]
         self.assertEqual(len(win._pending_jobs), 1)
         self.assertEqual(win._pending_jobs[0].text, dummy_script["raw_text"])
+        self.assertEqual(win._pending_jobs[0].timing_config["target_video_max"], 30.0)
+
+        # Test chunker with custom timing
+        chunks = win.orchestrator.chunker.chunk_story_coherently(
+            test_job.text,
+            target_video_max=test_job.timing_config["target_video_max"],
+            allowed_delta_sec=test_job.timing_config["allowed_delta_sec"],
+            avg_wps=test_job.timing_config["wps"],
+            total_padding_sec=test_job.timing_config["padding_intro_sec"] + test_job.timing_config["padding_outro_sec"]
+        )
+        self.assertGreater(len(chunks), 0)
+
         win.close()
 
 

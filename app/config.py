@@ -10,6 +10,7 @@ APP_DATA_DIR = PROJECT_ROOT / "app_data"
 ASSETS_DIR = PROJECT_ROOT / "assets"
 
 SCRIPTS_DB_PATH = str(APP_DATA_DIR / "scripts_history.db")
+SESSION_STATE_PATH = APP_DATA_DIR / "session_state.json"
 VIDEO_POOL_DIR = APP_DATA_DIR / "video_pool"
 BGM_LIBRARY_DIR = APP_DATA_DIR / "bgm_library"
 RENDERS_DIR = APP_DATA_DIR / "renders"

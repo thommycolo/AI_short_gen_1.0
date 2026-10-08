@@ -16,6 +16,12 @@ def setup_logger(name: str = "AIShortGen") -> logging.Logger:
         datefmt="%H:%M:%S"
     )
 
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)

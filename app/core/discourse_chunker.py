@@ -75,7 +75,8 @@ class DiscourseCoherenceChunker:
         full_text: str,
         target_video_max: float = TARGET_VIDEO_MAX_SEC,      # Limite video 45.0s (Audio max 43.0s con 2.0s padding)
         allowed_delta_sec: float = ALLOWED_CHUNKING_DELTA_SEC,# Tolleranza +-7s: Reel consentiti tra 38.0s e 45.0s
-        avg_wps: float = DEFAULT_WPS                         # Velocità standard unificata 2.50 WPS (150 WPM)
+        avg_wps: float = DEFAULT_WPS,                         # Velocità standard unificata 2.50 WPS (150 WPM)
+        total_padding_sec: Optional[float] = None
     ) -> List[str]:
         """
         Suddivide lo script preservando l'integrità logico-discorsiva del dialogo e della narrazione:
@@ -96,12 +97,13 @@ class DiscourseCoherenceChunker:
             return []
 
         # Durata stimata per singola frase
+        avg_wps = max(0.5, float(avg_wps))
         sent_durations = [len(s.split()) / avg_wps for s in sentences]
         total_audio_dur = sum(sent_durations)
 
-        total_padding = PADDING_TOTAL_SEC                             # 0.5s Intro + 1.5s Outro = 2.0s
-        max_audio_dur = target_video_max - total_padding              # 43.0s (Video 45.0s)
-        min_audio_dur = max_audio_dur - allowed_delta_sec             # 36.0s (Video 38.0s)
+        total_padding = PADDING_TOTAL_SEC if total_padding_sec is None else float(total_padding_sec)
+        max_audio_dur = max(5.0, target_video_max - total_padding)
+        min_audio_dur = max(3.0, max_audio_dur - allowed_delta_sec)
 
         # Se l'intera storia sta in un solo reel (<= 43.0s)
         if total_audio_dur <= max_audio_dur:

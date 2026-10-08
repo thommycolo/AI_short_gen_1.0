@@ -19,7 +19,8 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from app.config import (
     RENDERS_DIR, CATEGORIES, DEFAULT_WPS, TOTAL_PADDING_SEC,
     VRAM_APP_NET_BUDGET_MB, VRAM_MAX_CEILING_MB, CACHE_DIR,
-    DEFAULT_OUTRO_CTA_FINAL
+    DEFAULT_OUTRO_CTA_FINAL, TARGET_VIDEO_MAX_SEC, ALLOWED_CHUNKING_DELTA_SEC,
+    PADDING_INTRO_SEC, PADDING_OUTRO_SEC, OUTRO_PAUSE_SEC, SESSION_STATE_PATH
 )
 from app.core.script_manager import ScriptRepository
 from app.core.continuous_video_manager import ContinuousVideoPoolManager
@@ -48,6 +49,7 @@ from app.ui.modals.batch_queue_modal import BatchQueueModal
 from app.ui.modals.review_modal import PreProductionReviewModal
 from app.ui.modals.progress_dialog import ProductionProgressDialog
 from app.ui.modals.category_continuity_dialog import CategoryContinuityWarningDialog
+from app.ui.modals.clip_split_modal import ClipSplitAnalysisModal
 from app.ui.drawers.voice_settings_drawer import VoiceSettingsDrawer
 from app.ui.drawers.audio_settings_drawer import AudioSettingsDrawer
 from app.ui.drawers.video_settings_drawer import VideoSettingsDrawer
@@ -161,6 +163,7 @@ class MainWindow(QMainWindow):
         # Stato di Configurazione Corrente
         self.active_script_id: Optional[int] = None
         self.active_script_data: Optional[Dict[str, Any]] = None
+        self._rendered_complete: bool = False
         self.active_voice_config: Dict[str, Any] = {
             "speaker": "Ryan",
             "instruct": "Viral Hook (High Energy)",
@@ -183,6 +186,14 @@ class MainWindow(QMainWindow):
             "ducking_active": True,
             "voice_duck_db": -22.0,
             "intro_outro_duck_db": -14.0
+        }
+        self.active_timing_config: Dict[str, Any] = {
+            "target_video_max": TARGET_VIDEO_MAX_SEC,
+            "allowed_delta_sec": ALLOWED_CHUNKING_DELTA_SEC,
+            "wps": DEFAULT_WPS,
+            "padding_intro_sec": PADDING_INTRO_SEC,
+            "padding_outro_sec": PADDING_OUTRO_SEC,
+            "outro_pause_sec": OUTRO_PAUSE_SEC
         }
 
         self.current_worker: Optional[ProductionWorkerThread] = None
@@ -270,6 +281,7 @@ class MainWindow(QMainWindow):
         self.card_script = ScriptSelectorCard()
         self.card_script.new_script_requested.connect(self._open_new_script_modal)
         self.card_script.library_requested.connect(self._open_script_library_modal)
+        self.card_script.clip_split_requested.connect(self._open_clip_split_modal)
         self.card_script.clear_requested.connect(self._clear_active_script)
         left_layout.addWidget(self.card_script)
 
@@ -406,25 +418,132 @@ class MainWindow(QMainWindow):
             pass
         self.log_event(f"GPU Hardware: [OK] {gpu_name} (WDDM 8 GB / Net Budget 2.8 GB)")
 
-        # Carica uno script disponibile se presente
-        available = self.script_repo.list_scripts(status="DISPONIBILE")
-        if available:
-            self.set_active_script(available[0])
+        # Ripristino della sessione precedente o avvio con workspace pulito
+        self._restore_session_or_start_fresh()
 
         # Aggiorna lo stato del pool per la categoria corrente
         self._update_pool_status_display()
 
+    def _save_session_state(self):
+        """Salva in modo persistente la sessione su disco in JSON per riprendere il lavoro al riavvio."""
+        import json
+        try:
+            has_project = bool(self.active_script_data)
+            payload = {
+                "has_active_project": has_project,
+                "rendered_complete": getattr(self, "_rendered_complete", False),
+                "active_script_id": self.active_script_id,
+                "active_script_data": self.active_script_data if has_project else None,
+                "active_timing_config": self.active_timing_config,
+                "active_voice_config": self.active_voice_config,
+                "active_subtitle_config": self.active_subtitle_config,
+                "active_video_category": self.active_video_category,
+                "active_bgm_config": self.active_bgm_config,
+                "global_preset_text": self.cmb_global_preset.currentText() if hasattr(self, "cmb_global_preset") else None
+            }
+            Path(SESSION_STATE_PATH).parent.mkdir(parents=True, exist_ok=True)
+            with open(SESSION_STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            log.warning(f"Errore durante il salvataggio della sessione: {e}")
+
+    def _restore_session_or_start_fresh(self):
+        """
+        Ripristina lo stato completo della sessione di lavoro precedente (script, suddivisione clip,
+        parametri temporali, voce, sottotitoli, categoria, audio).
+        Se invece l'ultimo render è stato completato, o la sessione era vuota, avvia con workspace pulito.
+        """
+        import json
+        try:
+            session_file = Path(SESSION_STATE_PATH)
+            if not session_file.exists():
+                self._clear_active_script()
+                self.log_event("Workspace avviato pulito (nessuna sessione salvata in precedenza).")
+                return
+
+            with open(session_file, "r", encoding="utf-8") as f:
+                session = json.load(f)
+
+            rendered_complete = session.get("rendered_complete", False)
+            has_active_project = session.get("has_active_project", False)
+
+            # Se l'ultimo render è stato completato o il progetto è stato rimosso:
+            # il progetto deve risultare "vuoto" senza nulla di pre-caricato
+            if rendered_complete or not has_active_project:
+                self._clear_active_script()
+                self._rendered_complete = False
+                self._save_session_state()
+                self.log_event("Workspace avviato pulito: nessun progetto in sospeso dopo l'ultimo render.")
+                return
+
+            # Ripristina progetto in corso
+            script_data = session.get("active_script_data")
+            if not script_data:
+                self._clear_active_script()
+                return
+
+            timing_cfg = session.get("active_timing_config")
+            if timing_cfg and isinstance(timing_cfg, dict):
+                self.active_timing_config.update(timing_cfg)
+
+            voice_cfg = session.get("active_voice_config")
+            if voice_cfg and isinstance(voice_cfg, dict):
+                self.active_voice_config.update(voice_cfg)
+                self.card_voice.set_config(self.active_voice_config)
+
+            cat = session.get("active_video_category")
+            if cat and cat in CATEGORIES:
+                self.active_video_category = cat
+                self.card_video.combo_category.setCurrentText(cat)
+
+            sub_cfg = session.get("active_subtitle_config")
+            if sub_cfg and isinstance(sub_cfg, dict):
+                self.active_subtitle_config.update(sub_cfg)
+
+            bgm_cfg = session.get("active_bgm_config")
+            if bgm_cfg and isinstance(bgm_cfg, dict):
+                self.active_bgm_config.update(bgm_cfg)
+
+            self.active_script_id = session.get("active_script_id")
+            self.active_script_data = script_data
+            self._rendered_complete = False
+
+            self.card_script.set_script(script_data)
+
+            wps = float(self.active_timing_config.get("wps", DEFAULT_WPS))
+            num_clips = self.active_timing_config.get("num_clips") or script_data.get("num_clips")
+            tot_dur = self.active_timing_config.get("tot_video_sec") or script_data.get("est_duration_sec")
+
+            self.card_script.update_metrics(
+                wps=wps,
+                num_clips=num_clips,
+                total_duration_sec=tot_dur,
+                word_count=script_data.get("word_count"),
+                char_count=script_data.get("char_count")
+            )
+
+            title = script_data.get("context_title", "Senza Titolo")
+            clips_str = f" ({num_clips} clip Short)" if num_clips else ""
+            self.log_event(f"Sessione del progetto ripristinata con successo: \"{title}\"{clips_str}")
+
+        except Exception as e:
+            log.warning(f"Errore durante il ripristino della sessione: {e}")
+            self._clear_active_script()
+
     def set_active_script(self, script_data: Dict[str, Any]):
         self.active_script_id = script_data.get("id")
         self.active_script_data = script_data
+        self._rendered_complete = False
         self.card_script.set_script(script_data)
         self.log_event(f"Script attivo impostato: \"{script_data.get('context_title')}\" (ID: #{self.active_script_id})")
+        self._save_session_state()
 
     def _clear_active_script(self):
         self.active_script_id = None
         self.active_script_data = None
         self.card_script.clear_script(notify=False)
         self.log_event("Script attivo rimosso.")
+        self._save_session_state()
 
     def _update_pool_status_display(self):
         pool_stats = self.video_pool.get_pool_status_for_category(self.active_video_category)
@@ -454,6 +573,100 @@ class MainWindow(QMainWindow):
             selected = modal.get_selected_script()
             if selected:
                 self.set_active_script(selected)
+
+    def _open_clip_split_modal(self):
+        modal = ClipSplitAnalysisModal(
+            script_data=self.active_script_data,
+            current_timing=self.active_timing_config,
+            script_repo=self.script_repo,
+            parent=self
+        )
+        modal.script_updated.connect(lambda stats: self._apply_clip_split_results(stats, modal.get_timing_config()))
+        modal.timing_saved.connect(lambda cfg: self._apply_clip_split_results(modal.get_summary_stats(), cfg))
+        modal.exec()
+
+        stats = modal.get_summary_stats()
+        cfg = modal.get_timing_config()
+        self._apply_clip_split_results(stats, cfg)
+
+    def _apply_clip_split_results(self, stats: Dict[str, Any], cfg: Dict[str, Any]):
+        new_title = stats.get("context_title") or "Nuova Storia"
+        new_chunks = stats.get("custom_chunks") or []
+        new_wps = float(stats.get("wps", DEFAULT_WPS))
+        num_clips = stats.get("num_clips", len(new_chunks))
+        tot_vid = float(stats.get("tot_video_sec", 0.0))
+        tot_words = int(stats.get("word_count", 0))
+        tot_chars = int(stats.get("char_count", 0))
+
+        self.active_timing_config.update(cfg)
+        self.active_timing_config["custom_chunks"] = new_chunks
+        self.active_timing_config["custom_intros"] = stats.get("custom_intros", [])
+        self.active_timing_config["custom_outros"] = stats.get("custom_outros", [])
+        self.active_timing_config["num_clips"] = num_clips
+        self.active_timing_config["tot_video_sec"] = tot_vid
+
+        if not self.active_script_data:
+            self.active_script_data = {
+                "id": None,
+                "context_title": new_title,
+                "raw_text": " ".join(new_chunks),
+                "word_count": tot_words,
+                "char_count": tot_chars,
+                "est_duration_sec": tot_vid,
+                "status": "DISPONIBILE",
+                "custom_chunks": new_chunks,
+                "num_clips": num_clips
+            }
+        else:
+            self.active_script_data["context_title"] = new_title
+            if new_chunks:
+                self.active_script_data["raw_text"] = " ".join(new_chunks)
+            self.active_script_data["word_count"] = tot_words
+            self.active_script_data["char_count"] = tot_chars
+            self.active_script_data["est_duration_sec"] = tot_vid
+            self.active_script_data["custom_chunks"] = new_chunks
+            self.active_script_data["num_clips"] = num_clips
+
+        self.card_script.set_script(self.active_script_data)
+        self.card_script.update_metrics(
+            wps=new_wps,
+            num_clips=num_clips,
+            total_duration_sec=tot_vid,
+            word_count=tot_words,
+            char_count=tot_chars
+        )
+
+        if self.active_script_id:
+            try:
+                import sqlite3
+                with sqlite3.connect(self.script_repo.db_path) as conn:
+                    conn.execute(
+                        "UPDATE scripts SET context_title = ?, raw_text = ?, word_count = ?, char_count = ?, est_duration_sec = ? WHERE id = ?",
+                        (
+                            self.active_script_data["context_title"],
+                            self.active_script_data.get("raw_text", ""),
+                            tot_words,
+                            tot_chars,
+                            tot_vid,
+                            self.active_script_id
+                        )
+                    )
+            except Exception as e_db:
+                log.warning(f"Salvataggio titolo/testo aggiornato nel DB: {e_db}")
+
+        self._rendered_complete = False
+        self._save_session_state()
+        t_max = cfg.get("target_video_max")
+        d_sec = cfg.get("allowed_delta_sec")
+        self.log_event(f"Parametri temporali & suddivisione Short aggiornati: Titolo \"{new_title}\", Max {t_max}s (±{d_sec}s), {num_clips} clip, ~{tot_vid:.1f}s")
+
+    def _on_timing_config_saved(self, new_timing: dict):
+        self.active_timing_config.update(new_timing)
+        new_wps = float(new_timing.get("wps", DEFAULT_WPS))
+        self.card_script.update_metrics(wps=new_wps)
+        t_max = new_timing.get("target_video_max")
+        d_sec = new_timing.get("allowed_delta_sec")
+        self.log_event(f"Parametri temporali Short aggiornati: Max {t_max}s (±{d_sec}s), {new_wps:.2f} WPS ({int(new_wps * 60)} WPM)")
 
     def _open_video_download_modal(self):
         modal = VideoDownloadModal(self.video_pool, default_category=self.active_video_category, parent=self)
@@ -487,6 +700,7 @@ class MainWindow(QMainWindow):
     def _on_voice_settings_saved(self, settings: dict):
         self.active_voice_config.update(settings)
         self.card_voice.set_config(self.active_voice_config)
+        self._save_session_state()
         self.log_event(f"Configurazione Voce aggiornata: {settings.get('speaker', 'Ryan')} ({settings.get('instruct', '')})")
 
     def _open_audio_settings_drawer(self):
@@ -497,6 +711,7 @@ class MainWindow(QMainWindow):
 
     def _on_bgm_settings_saved(self, settings: dict):
         self.active_bgm_config.update(settings)
+        self._save_session_state()
         self.log_event("Impostazioni Audio/BGM aggiornate.")
 
     def _open_video_settings_drawer(self):
@@ -554,6 +769,7 @@ class MainWindow(QMainWindow):
 
     def _on_subtitle_settings_saved(self, settings: dict):
         self.active_subtitle_config.update(settings)
+        self._save_session_state()
         self.log_event(f"Tipografia sottotitoli aggiornata: {settings.get('font_name', '')} {settings.get('font_size', '')}pt")
 
     def _import_local_video(self):
@@ -572,19 +788,23 @@ class MainWindow(QMainWindow):
 
     def _on_voice_changed(self, voice_dict: dict):
         self.active_voice_config.update(voice_dict)
+        self._save_session_state()
         self.log_event(f"Speaker impostato: {voice_dict.get('speaker', '')} ({voice_dict.get('instruct', voice_dict.get('style', ''))})")
 
     def _on_video_category_changed(self, category: str):
         self.active_video_category = category
         self._update_pool_status_display()
+        self._save_session_state()
         self.log_event(f"Categoria video attiva: {category}")
 
     def _on_subtitle_style_changed(self, style_dict: dict):
         self.active_subtitle_config.update(style_dict)
+        self._save_session_state()
         self.log_event(f"Preset sottotitoli selezionato: {style_dict.get('font_name', '')}")
 
     def _on_global_preset_changed(self, index: int):
         txt = self.cmb_global_preset.currentText()
+        self._save_session_state()
         self.log_event(f"Preset globale caricato: {txt}")
 
     def _audition_voice_preview(self):
@@ -648,8 +868,10 @@ class MainWindow(QMainWindow):
         text = self.active_script_data.get("raw_text") or self.active_script_data.get("full_text", "")
         speed = float(self.active_voice_config.get("speed", 1.0))
         word_count = len(text.split())
-        est_audio = word_count / (DEFAULT_WPS * speed)
-        est_video = est_audio + TOTAL_PADDING_SEC
+        timing_wps = float(self.active_timing_config.get("wps", DEFAULT_WPS))
+        total_p = float(self.active_timing_config.get("padding_intro_sec", PADDING_INTRO_SEC)) + float(self.active_timing_config.get("padding_outro_sec", PADDING_OUTRO_SEC))
+        est_audio = word_count / (timing_wps * speed)
+        est_video = est_audio + total_p
 
         pool_status = self.video_pool.get_pool_status_for_category(self.active_video_category)
         avail_sec = pool_status.get("total_available_sec", 0.0)
@@ -738,7 +960,8 @@ class MainWindow(QMainWindow):
             voice_config=dict(self.active_voice_config),
             subtitle_config=dict(self.active_subtitle_config),
             bgm_config=dict(self.active_bgm_config),
-            speed_rate=speed
+            speed_rate=speed,
+            timing_config=dict(self.active_timing_config)
         )
         self._pending_jobs = [job]
         self._active_job_title = title
@@ -825,7 +1048,8 @@ class MainWindow(QMainWindow):
                 voice_config=v_cfg,
                 subtitle_config=s_cfg,
                 bgm_config=b_cfg,
-                speed_rate=speed
+                speed_rate=speed,
+                timing_config=dict(self.active_timing_config)
             )
             jobs.append(job)
 
@@ -910,8 +1134,10 @@ class MainWindow(QMainWindow):
             self.progress_dialog.finish_production(len(produced_shorts))
 
         self._update_pool_status_display()
+        self._rendered_complete = True
         self._clear_active_script()
         self._pending_jobs = []
+        self._save_session_state()
 
     def _on_worker_error(self, err_msg: str):
         self.log_event(f"🔴 Errore pipeline di produzione: {err_msg}")
@@ -927,3 +1153,7 @@ class MainWindow(QMainWindow):
             self.current_worker.terminate()
         self.log_event("Rollback atomico completato: script e clip ripristinati nello stato DISPONIBILE.")
         self._update_pool_status_display()
+
+    def closeEvent(self, event):
+        self._save_session_state()
+        super().closeEvent(event)

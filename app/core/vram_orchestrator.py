@@ -13,7 +13,8 @@ from typing import List, Dict, Any, Optional, Callable, Tuple
 
 from app.config import (
     CACHE_DIR, RENDERS_DIR, PADDING_INTRO_SEC, PADDING_OUTRO_SEC,
-    PADDING_TOTAL_SEC, OUTRO_PAUSE_SEC, VRAM_APP_NET_BUDGET_MB, VRAM_MAX_CEILING_MB
+    PADDING_TOTAL_SEC, OUTRO_PAUSE_SEC, VRAM_APP_NET_BUDGET_MB, VRAM_MAX_CEILING_MB,
+    TARGET_VIDEO_MAX_SEC, ALLOWED_CHUNKING_DELTA_SEC, DEFAULT_WPS
 )
 from app.core.tts_engine import Qwen3VoiceSuite
 from app.core.discourse_chunker import DiscourseCoherenceChunker
@@ -150,6 +151,7 @@ class ProductionJob:
     subtitle_config: Optional[dict] = None
     bgm_config: Optional[dict] = None
     speed_rate: float = 1.0
+    timing_config: Optional[dict] = None
 
 
 class VRAMLifecycleOrchestrator:
@@ -283,9 +285,28 @@ class VRAMLifecycleOrchestrator:
         sub_cfg = job.subtitle_config or {}
         bgm_cfg = job.bgm_config or {}
         speed = job.speed_rate
+        timing_cfg = job.timing_config or {}
 
-        # 1. Suddivisione in parti coerenti (+-7s)
-        parts = self.chunker.chunk_story_coherently(raw_text, avg_wps=2.50 * speed)
+        # Estrazione parametri temporali dinamici (con fallback a costanti globali)
+        target_video_max = float(timing_cfg.get("target_video_max", TARGET_VIDEO_MAX_SEC))
+        allowed_delta = float(timing_cfg.get("allowed_delta_sec", ALLOWED_CHUNKING_DELTA_SEC))
+        p_intro = float(timing_cfg.get("padding_intro_sec", PADDING_INTRO_SEC))
+        p_outro = float(timing_cfg.get("padding_outro_sec", PADDING_OUTRO_SEC))
+        outro_pause = float(timing_cfg.get("outro_pause_sec", OUTRO_PAUSE_SEC))
+        custom_chunks = timing_cfg.get("custom_chunks", None)
+
+        # 1. Suddivisione in parti coerenti o utilizzo chunk personalizzati
+        if custom_chunks and isinstance(custom_chunks, list) and len(custom_chunks) > 0:
+            parts = [c.strip() for c in custom_chunks if c.strip()]
+        else:
+            effective_wps = float(timing_cfg.get("wps", 2.50)) * speed
+            parts = self.chunker.chunk_story_coherently(
+                raw_text,
+                target_video_max=target_video_max,
+                allowed_delta_sec=allowed_delta,
+                avg_wps=effective_wps,
+                total_padding_sec=p_intro + p_outro
+            )
         if not parts:
             parts = [raw_text]
         total_parts = len(parts)
@@ -305,12 +326,24 @@ class VRAMLifecycleOrchestrator:
                     on_step_progress(part_num, "Sintesi Vocale Qwen3-TTS", 10.0)
 
                 # Definizione testo finale (Outro CTA letto da TTS)
-                if part_num < total_parts:
-                    outro_spoken = f"Follow for part {part_num + 1}."
-                    outro_banner = f"Follow for part.{part_num + 1}"
+                custom_outros = timing_cfg.get("custom_outros")
+                if isinstance(custom_outros, list) and part_idx < len(custom_outros):
+                    co = custom_outros[part_idx]
+                    outro_spoken = co.get("spoken") or (f"Follow for part {part_num + 1}." if part_num < total_parts else "Follow for more.")
+                    outro_banner = co.get("banner") or (f"Follow for part.{part_num + 1}" if part_num < total_parts else "Follow for more!")
                 else:
-                    outro_spoken = "Follow for more."
-                    outro_banner = "Follow for more!"
+                    if part_num < total_parts:
+                        outro_spoken = f"Follow for part {part_num + 1}."
+                        outro_banner = f"Follow for part.{part_num + 1}"
+                    else:
+                        outro_spoken = "Follow for more."
+                        outro_banner = "Follow for more!"
+
+                # Definizione titolo/intro per il banner dei sottotitoli
+                custom_intros = timing_cfg.get("custom_intros")
+                intro_title = title
+                if isinstance(custom_intros, list) and part_idx < len(custom_intros):
+                    intro_title = custom_intros[part_idx] or title
 
                 temp_narr_wav = str(CACHE_DIR / f"temp_voice_{story_id}_p{part_num}_narr.wav")
                 temp_outro_wav = str(CACHE_DIR / f"temp_voice_{story_id}_p{part_num}_outro.wav")
@@ -325,16 +358,16 @@ class VRAMLifecycleOrchestrator:
                     outro_wav=temp_outro_wav
                 )
 
-                # Unione: narrazione + 1.0s di pausa/silenzio + outro letto dal TTS
+                # Unione: narrazione + pausa/silenzio + outro letto dal TTS
                 total_voice_dur, narr_dur, outro_dur = SileroVADSilenceTrimmer.stitch_narration_and_outro(
                     narration_wav_path=temp_narr_wav,
                     outro_wav_path=temp_outro_wav,
                     output_combined_path=temp_combined_wav,
-                    pause_sec=OUTRO_PAUSE_SEC
+                    pause_sec=outro_pause
                 )
 
-                # Calcolo Ground Truth Temporale (Intro 1.0s + Voce Totale + Outro 1.0s)
-                video_needed_dur = total_voice_dur + PADDING_INTRO_SEC + PADDING_OUTRO_SEC
+                # Calcolo Ground Truth Temporale (Intro + Voce Totale + Outro)
+                video_needed_dur = total_voice_dur + p_intro + p_outro
 
                 if on_step_progress:
                     on_step_progress(part_num, "Allineamento Sottotitoli Whisper", 35.0)
@@ -346,7 +379,7 @@ class VRAMLifecycleOrchestrator:
                 self.subtitle_gen.generate_ass(
                     word_events=word_events,
                     output_ass_path=ass_path,
-                    context_title=title,
+                    context_title=intro_title,
                     part_num=part_num,
                     total_parts=total_parts,
                     total_video_duration=video_needed_dur,
