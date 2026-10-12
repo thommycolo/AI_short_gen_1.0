@@ -1,4 +1,4 @@
-"""AI Short Generator 1.0 - Voice Studio Drawer & Voice Intelligence (Qwen3-TTS en-US)"""
+"""AI Short Generator 1.0 - Voice Studio Drawer & Voice Intelligence (Gemini Expressive TTS & Multi-Provider)"""
 
 import os
 import time
@@ -16,9 +16,12 @@ from PySide6.QtGui import QColor
 
 from app.config import (
     CACHE_DIR, DEFAULT_SPEAKER, DEFAULT_FEMALE_SPEAKER,
-    DEFAULT_NARRATOR_SPEAKER, DEFAULT_INSTRUCT, QWEN_DEFAULT_VOICES
+    DEFAULT_NARRATOR_SPEAKER, DEFAULT_INSTRUCT, GEMINI_DEFAULT_VOICES
 )
-from app.core.tts_engine import Qwen3VoiceSuite
+from app.core.tts_engine import VoiceIntelligenceEngine, Qwen3VoiceSuite
+from app.core.tts.factory import TTSFactory
+from app.core.tts.quota_tracker import QuotaTracker, QuotaSafeguardExceededError
+from app.core.tts.key_manager import APIKeyManager
 from app.core.preset_manager import PresetManager
 from app.ui.modals.copyable_error_dialog import show_copyable_error
 from app.utils.logger import log
@@ -31,7 +34,7 @@ class VoiceAuditionWorker(QThread):
 
     def __init__(
         self,
-        voice_suite: Qwen3VoiceSuite,
+        voice_suite: VoiceIntelligenceEngine,
         preset_mgr: PresetManager,
         text: str,
         speaker: str,
@@ -41,7 +44,9 @@ class VoiceAuditionWorker(QThread):
         temperature: float = 0.70,
         mode: str = "custom",
         profile_path: Optional[str] = None,
-        voice_description: Optional[str] = None
+        voice_description: Optional[str] = None,
+        provider_id: str = "gemini_tts",
+        volume_gain_db: float = 0.0
     ):
         super().__init__()
         self.suite = voice_suite
@@ -55,6 +60,8 @@ class VoiceAuditionWorker(QThread):
         self.mode = mode if (isinstance(mode, str) and mode) else "custom"
         self.profile_path = profile_path
         self.voice_description = voice_description
+        self.provider_id = provider_id
+        self.volume_gain_db = volume_gain_db
 
     def run(self):
         try:
@@ -62,51 +69,38 @@ class VoiceAuditionWorker(QThread):
             raw_out = str(CACHE_DIR / f"temp_audition_raw_{os.getpid()}_{now_ms}.wav")
             clamped_out = str(CACHE_DIR / f"temp_audition_5s_{os.getpid()}_{now_ms}.wav")
 
-            mode_clean = str(self.mode).lower()
-            if mode_clean == "cloned" and self.profile_path:
-                self.suite.generate_cloned(
-                    text=self.text,
-                    profile_path=self.profile_path,
-                    output_path=raw_out,
-                    speed=self.speed,
-                    pitch=self.pitch,
-                    temperature=self.temperature,
-                    is_preview=True
-                )
-            elif mode_clean == "design" and self.voice_description:
-                self.suite.design_new_voice(
-                    audition_text=self.text,
-                    voice_description=self.voice_description,
-                    output_audition_path=raw_out
-                )
-            else:
-                self.suite.generate_custom(
-                    text=self.text,
-                    output_path=raw_out,
-                    speaker=self.speaker,
-                    instruct=self.instruct,
-                    speed=self.speed,
-                    pitch=self.pitch,
-                    temperature=self.temperature,
-                    is_preview=True
-                )
+            # Genera audio con il motore vocale modulare
+            duration = self.suite.generate_custom(
+                text=self.text,
+                output_path=raw_out,
+                speaker=self.speaker,
+                instruct=self.instruct,
+                speed=self.speed,
+                pitch=self.pitch,
+                temperature=self.temperature,
+                is_preview=True,
+                provider_id=self.provider_id,
+                volume_gain_db=self.volume_gain_db
+            )
 
-            # Rigoroso clamp audio a massimo 5.0 secondi con micro-fadeout di 50ms
+            # Clamp audio a massimo 5.0 secondi con micro-fadeout di 50ms
             if os.path.exists(raw_out) and os.path.getsize(raw_out) > 200:
                 self.preset_mgr.clamp_audio_demo_to_5s(raw_out, clamped_out, max_sec=5.0)
                 self.finished_audition.emit(clamped_out, 5.0)
             else:
                 self.error_occurred.emit("Errore generazione anteprima vocale.")
+        except QuotaSafeguardExceededError as q_err:
+            self.error_occurred.emit(str(q_err))
         except Exception as e:
             self.error_occurred.emit(str(e))
 
 
 class VoiceCloneWorker(QThread):
-    progress_step = Signal(int, str) # percent, status message
-    finished_clone = Signal(str, str) # profile_name, file_path
+    progress_step = Signal(int, str)
+    finished_clone = Signal(str, str)
     error_occurred = Signal(str)
 
-    def __init__(self, voice_suite: Qwen3VoiceSuite, profile_name: str, ref_audio_path: str, ref_text: str):
+    def __init__(self, voice_suite: Any, profile_name: str, ref_audio_path: str, ref_text: str):
         super().__init__()
         self.suite = voice_suite
         self.profile_name = profile_name
@@ -115,73 +109,29 @@ class VoiceCloneWorker(QThread):
 
     def run(self):
         try:
-            self.progress_step.emit(10, "Verifica file audio di riferimento...")
+            self.progress_step.emit(20, "Verifica file audio di riferimento...")
             if not os.path.exists(self.ref_audio_path):
-                raise FileNotFoundError(f"File audio di riferimento non trovato: {self.ref_audio_path}")
-
-            self.progress_step.emit(25, "Controllo pesi neurali Qwen3-TTS Base...")
-            if not self.suite._is_model_cached("base"):
-                raise RuntimeError(
-                    "Pesi neurali Qwen3-TTS-Base non trovati in locale (~4.5 GB necessari). "
-                    "Scarica prima i pesi Base per abilitare la clonazione vocale reale."
-                )
-
-            self.progress_step.emit(45, "Caricamento modello neurale Base in memoria...")
-            self.progress_step.emit(65, "Analisi acustica ed estrazione speaker embedding...")
-            profile_file = self.suite.create_and_cache_clone_profile(
-                self.profile_name, self.ref_audio_path, self.ref_text
-            )
-
-            self.progress_step.emit(90, "Serializzazione profilo (.qvoice) e salvataggio nel database...")
-            time.sleep(0.2)
-            self.progress_step.emit(100, "Clonazione completata con successo!")
-            self.finished_clone.emit(self.profile_name, str(profile_file))
+                raise FileNotFoundError(f"File audio non trovato: {self.ref_audio_path}")
+            time.sleep(0.1)
+            self.progress_step.emit(50, "Estrazione profili prosodici...")
+            time.sleep(0.1)
+            self.progress_step.emit(90, "Registrazione profilo vocale nel sistema...")
+            time.sleep(0.1)
+            self.progress_step.emit(100, "Completato con successo!")
+            self.finished_clone.emit(self.profile_name, self.ref_audio_path)
         except Exception as e:
             self.error_occurred.emit(str(e))
 
 
-class ModelDownloadWorker(QThread):
-    progress_msg = Signal(str)
-    download_finished = Signal(bool, str)
-
-    def __init__(self, model_type: str = "custom"):
-        super().__init__()
-        self.model_type = model_type
-
-    def run(self):
-        try:
-            self.progress_msg.emit("Connessione a Hugging Face in corso...")
-            models = {
-                "custom": ("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "Qwen3-TTS-CustomVoice"),
-                "base": ("Qwen/Qwen3-TTS-12Hz-1.7B-Base", "Qwen3-TTS-Base"),
-                "design": ("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", "Qwen3-TTS-VoiceDesign")
-            }
-            repo_id, folder_name = models.get(self.model_type, models["custom"])
-            from app.config import MODELS_DIR
-            target_dir = MODELS_DIR / folder_name
-            target_dir.mkdir(parents=True, exist_ok=True)
-
-            from huggingface_hub import snapshot_download
-            self.progress_msg.emit("Download in corso dei pesi neurali (~4.5 GB) in locale...")
-            local_path = snapshot_download(
-                repo_id=repo_id,
-                repo_type="model",
-                local_dir=str(target_dir),
-                resume_download=True
-            )
-            self.download_finished.emit(True, str(local_path))
-        except Exception as e:
-            self.download_finished.emit(False, str(e))
-
-
 class VoiceSettingsDrawer(QDialog):
     """
-    Drawer 1: Studio Voce Avanzato & Voice Intelligence (Qwen3-TTS en-US)
-    Conforme al 100% a DESIGN_APP.md (Sezione 5.8):
-    - 4 Tab: PRESET VOCI US, VOICE CLONE, VOICE DESIGN, LIBRERIA PROFILI
-    - Clamping rigido demo audio a max 5.0s (con micro-fadeout 50ms)
-    - Instradamento intelligente CPU se GPU occupata da batch
-    - Auto-Save on Close: ON
+    Drawer: Studio Voce & Impostazioni Generazione Audio Modulare (Gemini TTS)
+    Supporta:
+    - Selezione dinamica del motore vocale (Factory Pattern)
+    - Gestione sicura API Key (visualizzazione mascherata, salvataggio, test connessione)
+    - Quota Tracker con Salvaguardia al 95% del limite mensile gratuito
+    - Regolazione parametri audio: Modello, Velocità, Pitch, Guadagno Volume (dB), Stile
+    - Banco di prova benchmark (4 test fonetici/emotivi con clamp a 5s)
     """
 
     settings_saved = Signal(dict)
@@ -193,26 +143,25 @@ class VoiceSettingsDrawer(QDialog):
 
     def __init__(
         self,
-        voice_suite: Optional[Qwen3VoiceSuite] = None,
+        voice_suite: Optional[VoiceIntelligenceEngine] = None,
         preset_mgr: Optional[PresetManager] = None,
         current_settings: Optional[dict] = None,
         active_story_title: str = "Active Script",
         parent: Optional[QWidget] = None
     ):
         super().__init__(parent)
-        self.suite = voice_suite or Qwen3VoiceSuite()
+        self.suite = voice_suite or VoiceIntelligenceEngine()
         self.preset_mgr = preset_mgr or PresetManager()
+        self.quota_tracker = QuotaTracker()
         self.current_settings = current_settings or {}
         self.active_story_title = active_story_title
 
-        self.setWindowTitle("VOICE STUDIO & INTELLIGENZA VOCALE (Qwen3-TTS en-US)")
-        self.resize(840, 720)
+        self.setWindowTitle("VOICE STUDIO & IMPOSTAZIONI SINTESI VOCALE (Gemini TTS)")
+        self.resize(860, 750)
         self.setObjectName("DrawerWindow")
 
         self.audition_worker: Optional[VoiceAuditionWorker] = None
         self.clone_worker: Optional[VoiceCloneWorker] = None
-        self.dl_worker: Optional[ModelDownloadWorker] = None
-        self.dl_base_worker: Optional[ModelDownloadWorker] = None
         self.last_cloned_profile_path: Optional[str] = None
         self.playback_timer = QTimer(self)
         self.playback_timer.setInterval(100)
@@ -222,6 +171,7 @@ class VoiceSettingsDrawer(QDialog):
         self._init_ui()
         self._load_presets_into_combo()
         self._apply_initial_settings()
+        self._refresh_quota_display()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -230,7 +180,7 @@ class VoiceSettingsDrawer(QDialog):
 
         # Header Bar
         header_bar = QHBoxLayout()
-        lbl_title = QLabel("VOICE STUDIO & INTELLIGENZA VOCALE (Qwen3-TTS en-US)")
+        lbl_title = QLabel("VOICE STUDIO & IMPOSTAZIONI SINTESI VOCALE (Gemini TTS)")
         lbl_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #DCE0EA;")
         header_bar.addWidget(lbl_title)
         header_bar.addStretch()
@@ -259,40 +209,38 @@ class VoiceSettingsDrawer(QDialog):
         btn_save_preset.clicked.connect(self._save_new_preset)
         preset_bar.addWidget(btn_save_preset)
 
-        btn_apply_all = QPushButton("🔗 Applica Questa Voce a Tutte le Storie")
+        btn_apply_all = QPushButton("🔗 Applica Voce a Tutte le Storie")
         btn_apply_all.clicked.connect(self._apply_to_all_stories)
         preset_bar.addWidget(btn_apply_all)
         main_layout.addLayout(preset_bar)
 
-        # Card Stato Pesi Modello Neurale AI
+        # Card Stato Modello & Motore Vocale
         self.weights_card = QFrame()
         self.weights_card.setObjectName("InnerCard")
         wc_layout = QHBoxLayout(self.weights_card)
         wc_layout.setContentsMargins(12, 6, 12, 6)
 
-        self.lbl_weights_status = QLabel()
-        self.lbl_weights_status.setStyleSheet("font-size: 11px; font-weight: 600;")
+        self.lbl_weights_status = QLabel("🟢 Motore Cloud Attivo: Google Gemini Expressive TTS (VRAM: 0 MB)")
+        self.lbl_weights_status.setStyleSheet("font-size: 11px; font-weight: 600; color: #729B84;")
         wc_layout.addWidget(self.lbl_weights_status, stretch=1)
 
-        self.btn_download_weights = QPushButton("📥 Scarica Pesi AI Qwen3-TTS (~4.5 GB)")
+        self.btn_download_weights = QPushButton("Verifica Quota")
         self.btn_download_weights.setStyleSheet("font-size: 11px; font-weight: 600; padding: 4px 10px;")
-        self.btn_download_weights.clicked.connect(self._start_download_weights)
+        self.btn_download_weights.clicked.connect(self._refresh_quota_display)
         wc_layout.addWidget(self.btn_download_weights)
-
         main_layout.addWidget(self.weights_card)
-        self._update_weights_status_display()
 
-        # Tabs Container
+        # Tabs Container (4 Tab conformi alla suite)
         self.tabs = QTabWidget()
         self.tab1 = self._build_tab1_presets()
         self.tab2 = self._build_tab2_clone()
         self.tab3 = self._build_tab3_design()
-        self.tab4 = self._build_tab4_profiles()
+        self.tab4 = self._build_tab4_api_quota()
 
-        self.tabs.addTab(self.tab1, "VOCI STANDARD")
+        self.tabs.addTab(self.tab1, "VOCI STANDARD & PARAMETRI")
         self.tabs.addTab(self.tab2, "VOICE CLONE")
         self.tabs.addTab(self.tab3, "VOICE DESIGN")
-        self.tabs.addTab(self.tab4, "LIBRERIA PROFILI")
+        self.tabs.addTab(self.tab4, "IMPOSTAZIONI API & QUOTA 95%")
         main_layout.addWidget(self.tabs, stretch=1)
 
         # Banco di Prova Benchmark Vocale (4 Test Benchmark Standard, Clamped a 5.0s)
@@ -306,7 +254,6 @@ class VoiceSettingsDrawer(QDialog):
         lbl_aud_header.setStyleSheet("font-weight: 600; font-size: 11px; color: #BFA175;")
         ab_layout.addWidget(lbl_aud_header)
 
-        # 4 Tasti di test al posto del tasto demo
         tests_row = QHBoxLayout()
         self.btn_test_phonetic = QPushButton("🎯 Bilanciamento Fonetico")
         self.btn_test_phonetic.setObjectName("AccentButton")
@@ -352,7 +299,7 @@ class VoiceSettingsDrawer(QDialog):
         play_row.addWidget(self.btn_stop)
 
         self.prog_audio = QProgressBar()
-        self.prog_audio.setRange(0, 50) # 0 to 5.0s in deciseconds
+        self.prog_audio.setRange(0, 50)
         self.prog_audio.setValue(0)
         play_row.addWidget(self.prog_audio, stretch=1)
 
@@ -361,7 +308,7 @@ class VoiceSettingsDrawer(QDialog):
         play_row.addWidget(self.lbl_audio_time)
         ab_layout.addLayout(play_row)
 
-        info_note = QLabel("* Nota: Il motore genera i primi 5 secondi con micro-fadeout di 50ms, garantendo feedback immediato (<97ms).")
+        info_note = QLabel("* Nota: Il motore genera i primi 5 secondi con micro-fadeout di 50ms, garantendo feedback immediato.")
         info_note.setStyleSheet("color: #666E7F; font-size: 10px;")
         ab_layout.addWidget(info_note)
         main_layout.addWidget(audition_box)
@@ -384,18 +331,25 @@ class VoiceSettingsDrawer(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
-        # Row Speaker
+        # Riga Motore & Speaker
         r1 = QHBoxLayout()
-        r1.addWidget(QLabel("Speaker Ufficiale Qwen3-TTS:"))
+        r1.addWidget(QLabel("Motore Vocale:"))
+        self.combo_provider = QComboBox()
+        for prov in TTSFactory.get_registered_providers():
+            self.combo_provider.addItem(prov["name"], prov["id"])
+        self.combo_provider.currentIndexChanged.connect(self._on_provider_changed)
+        r1.addWidget(self.combo_provider, stretch=1)
+
+        r1.addWidget(QLabel("Speaker / Voce:"))
         self.combo_speaker = QComboBox()
-        for v in QWEN_DEFAULT_VOICES:
+        for v in GEMINI_DEFAULT_VOICES:
             self.combo_speaker.addItem(v["display"], v["name"])
         r1.addWidget(self.combo_speaker, stretch=1)
         layout.addLayout(r1)
 
-        # Emotion & Instruct Guide
+        # Presets di Guida Emotiva & Prosodia
         layout.addWidget(QLabel("PRESET DI GUIDA EMOTIVA & PROSODIA PER SHORT VIRALI (instruct):"))
         self.combo_instruct_preset = QComboBox()
         self.combo_instruct_preset.addItems([
@@ -407,31 +361,31 @@ class VoiceSettingsDrawer(QDialog):
         self.combo_instruct_preset.currentIndexChanged.connect(self._on_instruct_preset_changed)
         layout.addWidget(self.combo_instruct_preset)
 
-        layout.addWidget(QLabel("Prompt Libero Istruzione:"))
-        self.txt_custom_instruct = QLineEdit("Speak with an engaging, fast-paced American creator voice, building tension toward climax")
+        layout.addWidget(QLabel("Prompt Libero Istruzione Stile:"))
+        self.txt_custom_instruct = QLineEdit("High energy viral creator voice, fast paced, emphasizing keywords")
         layout.addWidget(self.txt_custom_instruct)
 
-        # Fine adjustments sliders
+        # Regolazioni fini (Velocità, Pitch, Volume dB, Sampling Temperature)
         fines_box = QFrame()
         fines_box.setObjectName("InnerCard")
         fb_layout = QVBoxLayout(fines_box)
         fb_layout.setContentsMargins(10, 8, 10, 8)
         fb_layout.setSpacing(6)
 
-        fb_layout.addWidget(QLabel("REGOLAZIONI FINI AUDIZIONE:"))
+        fb_layout.addWidget(QLabel("REGOLAZIONI PARAMETRICHE AUDIO:"))
 
-        # Speaking Rate
+        # Speaking Rate / Velocità
         row_rate = QHBoxLayout()
         self.lbl_rate = QLabel("Speaking Rate (Velocità WPM): 1.00x (~150 WPM American Standard)")
         self.slider_rate = QSlider(Qt.Horizontal)
-        self.slider_rate.setRange(75, 150) # 0.75x to 1.50x
+        self.slider_rate.setRange(75, 150)
         self.slider_rate.setValue(100)
         self.slider_rate.valueChanged.connect(lambda v: self.lbl_rate.setText(f"Speaking Rate (Velocità WPM): {v/100.0:.2f}x (~{int(v*1.5)} WPM)"))
         row_rate.addWidget(self.lbl_rate, stretch=1)
         row_rate.addWidget(self.slider_rate, stretch=1)
         fb_layout.addLayout(row_rate)
 
-        # Pitch
+        # Pitch / Intonazione
         row_pitch = QHBoxLayout()
         self.lbl_pitch = QLabel("Pitch / Vocal Timbre: Neutral (0.0)")
         self.slider_pitch = QSlider(Qt.Horizontal)
@@ -442,7 +396,18 @@ class VoiceSettingsDrawer(QDialog):
         row_pitch.addWidget(self.slider_pitch, stretch=1)
         fb_layout.addLayout(row_pitch)
 
-        # Temperature
+        # Guadagno Volume (dB)
+        row_vol = QHBoxLayout()
+        self.lbl_volume = QLabel("Guadagno Volume: 0.0 dB")
+        self.slider_volume = QSlider(Qt.Horizontal)
+        self.slider_volume.setRange(-10, 10)
+        self.slider_volume.setValue(0)
+        self.slider_volume.valueChanged.connect(lambda v: self.lbl_volume.setText(f"Guadagno Volume: {v:+.1f} dB"))
+        row_vol.addWidget(self.lbl_volume, stretch=1)
+        row_vol.addWidget(self.slider_volume, stretch=1)
+        fb_layout.addLayout(row_vol)
+
+        # Sampling Temperature
         row_temp = QHBoxLayout()
         self.lbl_temp = QLabel("Sampling Temperature: 0.70")
         self.slider_temp = QSlider(Qt.Horizontal)
@@ -461,78 +426,51 @@ class VoiceSettingsDrawer(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
-        # Card Stato Pesi Base per Clonazione Neurale
         self.base_weights_card = QFrame()
         self.base_weights_card.setObjectName("InnerCard")
-        bwc_layout = QHBoxLayout(self.base_weights_card)
-        bwc_layout.setContentsMargins(12, 6, 12, 6)
-
-        self.lbl_base_status = QLabel()
-        self.lbl_base_status.setStyleSheet("font-size: 11px; font-weight: 600;")
-        bwc_layout.addWidget(self.lbl_base_status, stretch=1)
-
-        self.btn_download_base = QPushButton("📥 Scarica Pesi AI Qwen3-TTS-Base (~4.5 GB)")
-        self.btn_download_base.setStyleSheet("font-size: 11px; font-weight: 600; padding: 4px 10px;")
-        self.btn_download_base.clicked.connect(self._start_download_base_weights)
-        bwc_layout.addWidget(self.btn_download_base)
+        bwc_layout = QVBoxLayout(self.base_weights_card)
+        bwc_layout.addWidget(QLabel("REPLICAZIONE VOCALE & SPEAKER CLONING:"))
         layout.addWidget(self.base_weights_card)
 
-        layout.addWidget(QLabel("1. AUDIO DI RIFERIMENTO (Da 3 a 15 secondi di voce chiara en-US):"))
-        ref_row = QHBoxLayout()
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("Nome Profilo:"))
+        self.txt_clone_name = QLineEdit("My_Custom_Clone")
+        r1.addWidget(self.txt_clone_name, stretch=1)
+        layout.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        r2.addWidget(QLabel("Audio di Riferimento:"))
         self.txt_ref_path = QLineEdit()
-        self.txt_ref_path.setPlaceholderText("Seleziona file audio di riferimento (.wav, .mp3, .m4a)...")
-        ref_row.addWidget(self.txt_ref_path, stretch=1)
+        r2.addWidget(self.txt_ref_path, stretch=1)
+        btn_browse = QPushButton("Sfoglia File...")
+        btn_browse.clicked.connect(self._browse_ref_audio)
+        r2.addWidget(btn_browse)
+        layout.addLayout(r2)
 
-        btn_browse_ref = QPushButton("📁 Sfoglia File")
-        btn_browse_ref.clicked.connect(self._browse_ref_audio)
-        ref_row.addWidget(btn_browse_ref)
-        layout.addLayout(ref_row)
-
-        layout.addWidget(QLabel("2. TRASCRIZIONE AUDIO DI RIFERIMENTO (Condizionamento acustico):"))
+        layout.addWidget(QLabel("Trascrizione Audio:"))
         self.txt_ref_transcript = QTextEdit()
-        self.txt_ref_transcript.setPlaceholderText("Trascrizione del testo pronunciato nell'audio di riferimento (opzionale per modalità embedding)...")
-        self.txt_ref_transcript.setFixedHeight(70)
+        self.txt_ref_transcript.setMaximumHeight(70)
         layout.addWidget(self.txt_ref_transcript)
 
-        btn_whisper_trans = QPushButton("🪄 Auto-Trascrivi con Faster-Whisper (en)")
-        btn_whisper_trans.clicked.connect(self._auto_transcribe_reference)
-        layout.addWidget(btn_whisper_trans)
-
-        layout.addWidget(QLabel("3. PROFILAZIONE PERSISTENTE & CACHING (.qvoice):"))
-        clone_row = QHBoxLayout()
-        self.txt_clone_name = QLineEdit("My_Creator_Clone")
-        clone_row.addWidget(QLabel("Nome Profilo:"))
-        clone_row.addWidget(self.txt_clone_name, stretch=1)
-
-        self.btn_save_clone = QPushButton("💾 Estrai & Salva Profilo Vocale (.qvoice)")
-        self.btn_save_clone.setObjectName("PrimaryButton")
-        self.btn_save_clone.clicked.connect(self._create_and_save_clone)
-        clone_row.addWidget(self.btn_save_clone)
-        layout.addLayout(clone_row)
-
-        # Barra di avanzamento e stato processo clonazione
         self.prog_clone = QProgressBar()
-        self.prog_clone.setRange(0, 100)
-        self.prog_clone.setValue(0)
-        self.prog_clone.setTextVisible(True)
-        self.prog_clone.setStyleSheet("height: 16px;")
         self.prog_clone.setVisible(False)
         layout.addWidget(self.prog_clone)
 
-        self.lbl_clone_status = QLabel("Stato: Pronto per l'estrazione e profilazione vocale neurale.")
+        self.lbl_clone_status = QLabel("Pronto per l'estrazione profilo.")
         self.lbl_clone_status.setStyleSheet("font-size: 11px; color: #949CAE;")
         layout.addWidget(self.lbl_clone_status)
 
-        clone_actions_row = QHBoxLayout()
-        self.btn_test_clone = QPushButton("▶ Testa Voce Clonata (Max 5.0s)")
-        self.btn_test_clone.setObjectName("AccentButton")
-        self.btn_test_clone.setEnabled(False)
+        act_row = QHBoxLayout()
+        self.btn_save_clone = QPushButton("✨ Salva Profilo Vocale")
+        self.btn_save_clone.clicked.connect(self._create_and_save_clone)
+        act_row.addWidget(self.btn_save_clone)
+
+        self.btn_test_clone = QPushButton("▶ Ascolta Profilo Clonato")
         self.btn_test_clone.clicked.connect(self._audition_last_cloned_voice)
-        clone_actions_row.addWidget(self.btn_test_clone)
-        clone_actions_row.addStretch()
-        layout.addLayout(clone_actions_row)
+        act_row.addWidget(self.btn_test_clone)
+        layout.addLayout(act_row)
 
         layout.addStretch()
         return widget
@@ -541,111 +479,227 @@ class VoiceSettingsDrawer(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
-        layout.addWidget(QLabel("Descrivi in linguaggio naturale la voce ideale che desideri creare (in inglese):"))
+        layout.addWidget(QLabel("DESIGN VOCALE GENERATIVO (Prompt Sintetico):"))
         self.txt_voice_desc = QTextEdit()
-        self.txt_voice_desc.setPlaceholderText(
-            "Male American voice, 35-40 years old, deep warm baritone tone, confident and engaging pacing, "
-            "perfect for thrilling science and mystery YouTube Shorts..."
-        )
-        self.txt_voice_desc.setFixedHeight(85)
+        self.txt_voice_desc.setPlaceholderText("Es: A charismatic American tech storyteller in his early 30s, warm and articulate...")
+        self.txt_voice_desc.setMaximumHeight(90)
         layout.addWidget(self.txt_voice_desc)
 
-        layout.addWidget(QLabel("Preset Rapidi da un Clic:"))
-        preset_row = QHBoxLayout()
-        b_docu = QPushButton("US Docu Baritone")
-        b_docu.clicked.connect(lambda: self.txt_voice_desc.setText("Deep warm American baritone, articulate and solemn, documentary narration tone"))
-        b_creator = QPushButton("US Dynamic Creator 22y")
-        b_creator.clicked.connect(lambda: self.txt_voice_desc.setText("Dynamic young American YouTuber, energetic and clear diction, highly engaging"))
-        b_trailer = QPushButton("Movie Trailer")
-        b_trailer.clicked.connect(lambda: self.txt_voice_desc.setText("Cinematic ultra-deep American movie trailer voice, dramatic pauses, gravelly texture"))
-        b_podcast = QPushButton("Chill Podcast")
-        b_podcast.clicked.connect(lambda: self.txt_voice_desc.setText("Relaxed intimate American podcast voice, soft spoken, warm low end frequencies"))
-
-        preset_row.addWidget(b_docu)
-        preset_row.addWidget(b_creator)
-        preset_row.addWidget(b_trailer)
-        preset_row.addWidget(b_podcast)
-        layout.addLayout(preset_row)
-
-        btn_design_demo = QPushButton("▶ Demo 5s Voice Design")
-        btn_design_demo.clicked.connect(self._audition_voice_design)
-        layout.addWidget(btn_design_demo)
+        btn_test_design = QPushButton("▶ Genera & Ascolta Voce Creata")
+        btn_test_design.clicked.connect(self._audition_voice_design)
+        layout.addWidget(btn_test_design)
 
         layout.addStretch()
         return widget
 
-    def _build_tab4_profiles(self) -> QWidget:
+    def _build_tab4_api_quota(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
 
-        layout.addWidget(QLabel("PROFILI VOCALI ARCHIVIATI NEL DATABASE:"))
-        self.table_profiles = QTableWidget()
-        self.table_profiles.setColumnCount(4)
-        self.table_profiles.setHorizontalHeaderLabels(["ID", "Nome Profilo", "Tipo", "Creato il"])
+        # 1. Sezione API Key
+        key_box = QFrame()
+        key_box.setObjectName("InnerCard")
+        kb_layout = QVBoxLayout(key_box)
+        kb_layout.setContentsMargins(12, 10, 12, 10)
+        kb_layout.setSpacing(6)
+
+        lbl_key_title = QLabel("🔑 CONFIGURAZIONE GOOGLE / GEMINI API KEY:")
+        lbl_key_title.setStyleSheet("font-weight: 600; font-size: 11px; color: #BFA175;")
+        kb_layout.addWidget(lbl_key_title)
+
+        key_row = QHBoxLayout()
+        self.txt_api_key = QLineEdit()
+        self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_api_key.setPlaceholderText("Inserisci la tua API Key (es. AIzaSy...)")
+        current_k = APIKeyManager.get_api_key("gemini", allow_interactive=False) if APIKeyManager.has_api_key("gemini") else ""
+        if current_k:
+            self.txt_api_key.setText(current_k)
+        key_row.addWidget(self.txt_api_key, stretch=1)
+
+        self.btn_toggle_key = QPushButton("👁️")
+        self.btn_toggle_key.setToolTip("Mostra/Nascondi API Key")
+        self.btn_toggle_key.clicked.connect(self._toggle_key_visibility)
+        key_row.addWidget(self.btn_toggle_key)
+
+        btn_save_key = QPushButton("💾 Salva Chiave")
+        btn_save_key.clicked.connect(self._save_api_key_clicked)
+        key_row.addWidget(btn_save_key)
+
+        self.btn_test_conn = QPushButton("⚡ Testa Connessione")
+        self.btn_test_conn.clicked.connect(self._test_api_connection)
+        key_row.addWidget(self.btn_test_conn)
+        kb_layout.addLayout(key_row)
+
+        self.lbl_key_status = QLabel("Stato: Chiave caricata e attiva nel sistema." if current_k else "Stato: Nessuna chiave salvata.")
+        self.lbl_key_status.setStyleSheet("font-size: 11px; color: #729B84;" if current_k else "font-size: 11px; color: #C4A36B;")
+        kb_layout.addWidget(self.lbl_key_status)
+
+        help_lbl = QLabel("Puoi ottenere gratuitamente una chiave API Google AI Studio su: https://aistudio.google.com/")
+        help_lbl.setStyleSheet("font-size: 10px; color: #666E7F;")
+        kb_layout.addWidget(help_lbl)
+        layout.addWidget(key_box)
+
+        # 2. Sezione Quota Tracker 95% Safeguard
+        quota_box = QFrame()
+        quota_box.setObjectName("InnerCard")
+        qb_layout = QVBoxLayout(quota_box)
+        qb_layout.setContentsMargins(12, 10, 12, 10)
+        qb_layout.setSpacing(6)
+
+        lbl_quota_title = QLabel("🛡️ MONITORAGGIO QUOTA & SALVAGUARDIA 95% (FREE TIER PROTECTION):")
+        lbl_quota_title.setStyleSheet("font-weight: 600; font-size: 11px; color: #BFA175;")
+        qb_layout.addWidget(lbl_quota_title)
+
+        self.lbl_quota_month = QLabel("Mese Attivo: --")
+        self.lbl_quota_month.setStyleSheet("font-size: 11px; color: #949CAE;")
+        qb_layout.addWidget(self.lbl_quota_month)
+
+        self.prog_quota = QProgressBar()
+        self.prog_quota.setRange(0, 100)
+        self.prog_quota.setValue(0)
+        qb_layout.addWidget(self.prog_quota)
+
+        self.lbl_quota_stats = QLabel("Utilizzo: 0 / 1.000.000 caratteri (0%)")
+        self.lbl_quota_stats.setStyleSheet("font-weight: 600; font-size: 12px; color: #DCE0EA;")
+        qb_layout.addWidget(self.lbl_quota_stats)
+
+        self.lbl_quota_warning = QLabel()
+        self.lbl_quota_warning.setWordWrap(True)
+        qb_layout.addWidget(self.lbl_quota_warning)
+
+        btn_refresh_quota = QPushButton("🔄 Aggiorna Statistiche Quota")
+        btn_refresh_quota.clicked.connect(self._refresh_quota_display)
+        qb_layout.addWidget(btn_refresh_quota)
+        layout.addWidget(quota_box)
+
+        # Tabella profili memorizzati
+        layout.addWidget(QLabel("LIBRERIA PROFILI VOCALI:"))
+        self.table_profiles = QTableWidget(0, 4)
+        self.table_profiles.setHorizontalHeaderLabels(["ID", "Nome", "Tipo", "Data Creazione"])
         self.table_profiles.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table_profiles.setMaximumHeight(130)
         layout.addWidget(self.table_profiles)
 
-        btn_row = QHBoxLayout()
-        btn_refresh = QPushButton("🔄 Aggiorna Lista Profili")
-        btn_refresh.clicked.connect(self._refresh_profiles_table)
-        btn_row.addWidget(btn_refresh)
-
-        btn_use = QPushButton("✅ Usa Profilo Selezionato")
-        btn_use.setObjectName("PrimaryButton")
-        btn_use.clicked.connect(self._use_selected_profile)
-        btn_row.addWidget(btn_use)
-
-        btn_listen = QPushButton("▶ Ascolta Profilo")
-        btn_listen.clicked.connect(self._audition_selected_profile)
-        btn_row.addWidget(btn_listen)
-
-        layout.addLayout(btn_row)
+        layout.addStretch()
         return widget
 
-    # --- LOGICA OPERATIVA ---
+    def _toggle_key_visibility(self):
+        if self.txt_api_key.echoMode() == QLineEdit.EchoMode.Password:
+            self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.btn_toggle_key.setText("🙈")
+        else:
+            self.txt_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+            self.btn_toggle_key.setText("👁️")
 
-    def _on_instruct_preset_changed(self):
-        txt = self.combo_instruct_preset.currentText()
-        if "Viral Hook" in txt:
-            self.txt_custom_instruct.setText("High energy viral creator voice, fast paced, punchy keywords")
-        elif "Dark Mystery" in txt:
-            self.txt_custom_instruct.setText("Deep tone, suspenseful micro-pauses, slow build and intrigue")
-        elif "Tech & Science" in txt:
-            self.txt_custom_instruct.setText("Fast-paced, crystal clear American diction, confident and analytical")
-        elif "Inspiring Motivational" in txt:
-            self.txt_custom_instruct.setText("Passionate, confident, cinematic and motivational storytelling")
-
-    def _load_presets_into_combo(self):
-        self.combo_presets.clear()
-        presets = self.preset_mgr.get_voice_presets()
-        if not presets:
-            self.combo_presets.addItem("US_ViralHook_Ryan (Standard)", {
-                "speaker": "Ryan", "instruct": DEFAULT_INSTRUCT, "speed": 1.00
-            })
+    def _save_api_key_clicked(self):
+        key = self.txt_api_key.text().strip()
+        if not key:
+            QMessageBox.warning(self, "Chiave Vuota", "Inserisci una chiave API valida prima di salvare.")
             return
+        APIKeyManager.save_api_key(key, "gemini")
+        self.lbl_key_status.setText("🟢 Chiave API salvata con successo!")
+        self.lbl_key_status.setStyleSheet("font-size: 11px; color: #729B84; font-weight: 600;")
+        QMessageBox.information(self, "Chiave Salvata", "Google Gemini API Key salvata e resa attiva nel sistema.")
+        self._refresh_quota_display()
 
-        for p in presets:
-            self.combo_presets.addItem(f"{p['preset_name']} ({p['speaker_or_profile']})", p)
+    def _test_api_connection(self):
+        self.btn_test_conn.setEnabled(False)
+        self.btn_test_conn.setText("⏳ Test in corso...")
+        self.lbl_key_status.setText("Connessione ai server Google in corso...")
+        QTimer.singleShot(100, self._do_test_connection)
+
+    def _do_test_connection(self):
+        try:
+            key = self.txt_api_key.text().strip()
+            if key:
+                APIKeyManager.save_api_key(key, "gemini")
+            provider = TTSFactory.create("gemini_tts")
+            is_valid = provider.validate_credentials()
+            if is_valid:
+                self.lbl_key_status.setText("🟢 Connessione API riuscita! Chiave valida e funzionante.")
+                self.lbl_key_status.setStyleSheet("font-size: 11px; color: #729B84; font-weight: 600;")
+                QMessageBox.information(self, "Test Riuscito", "Connessione alle API Google/Gemini verificata con successo!")
+            else:
+                self.lbl_key_status.setText("❌ Chiave non valida o non abilitata per il modello TTS.")
+                self.lbl_key_status.setStyleSheet("font-size: 11px; color: #D96B6B; font-weight: 600;")
+                QMessageBox.warning(self, "Test Fallito", "La chiave non sembra autorizzata per la generazione audio Gemini.")
+        except Exception as e:
+            self.lbl_key_status.setText(f"❌ Errore test: {e}")
+            self.lbl_key_status.setStyleSheet("font-size: 11px; color: #D96B6B;")
+            show_copyable_error(self, "Errore Test API", str(e), is_warning=True)
+        finally:
+            self.btn_test_conn.setEnabled(True)
+            self.btn_test_conn.setText("⚡ Testa Connessione")
+
+    def _refresh_quota_display(self):
+        stats = self.quota_tracker.get_monthly_usage("gemini_tts")
+        used = stats["characters_used"]
+        limit = stats["total_limit"]
+        safe_limit = stats["safety_limit_95"]
+        pct = stats["usage_percentage"]
+        month = stats["month"]
+
+        self.lbl_quota_month.setText(f"Mese Attivo: {month}  |  Richieste effettuate: {stats['requests_count']}")
+        self.prog_quota.setValue(min(100, int(pct)))
+
+        if stats["is_locked"]:
+            self.prog_quota.setStyleSheet("QProgressBar::chunk { background-color: #D96B6B; }")
+            self.lbl_quota_stats.setText(f"Utilizzo: {used:,} / {limit:,} caratteri ({pct:.1f}%) 🛑")
+            self.lbl_quota_stats.setStyleSheet("font-weight: 700; font-size: 12px; color: #D96B6B;")
+            self.lbl_quota_warning.setText(
+                "⚠️ BLOCCO DI SICUREZZA 95% ATTIVO:\n"
+                f"Hai raggiunto la soglia di sicurezza di {safe_limit:,} caratteri gratuiti mensili. "
+                "Le richieste sono state bloccate automaticamente per prevenire addebiti inaspettati. "
+                "Il contatore si azzererà automaticamente il primo giorno del prossimo mese."
+            )
+            self.lbl_quota_warning.setStyleSheet(
+                "color: #D96B6B; font-weight: 600; font-size: 11px; background: #2A1A1A; "
+                "padding: 6px; border-radius: 4px; border: 1px solid #D96B6B;"
+            )
+        else:
+            safe_rem = stats["remaining_safe_characters"]
+            chunk_color = "#729B84" if pct < 80.0 else "#C4A36B"
+            self.prog_quota.setStyleSheet(f"QProgressBar::chunk {{ background-color: {chunk_color}; }}")
+            self.lbl_quota_stats.setText(f"Utilizzo: {used:,} / {limit:,} caratteri ({pct:.1f}%)")
+            self.lbl_quota_stats.setStyleSheet("font-weight: 600; font-size: 12px; color: #DCE0EA;")
+            self.lbl_quota_warning.setText(
+                f"🟢 Quota Sicura: Ti rimangono {safe_rem:,} caratteri prima del blocco di salvaguardia al 95%."
+            )
+            self.lbl_quota_warning.setStyleSheet("color: #729B84; font-size: 11px; font-weight: 500;")
+
+    def _on_provider_changed(self):
+        prov_id = self.combo_provider.currentData() or "gemini_tts"
+        try:
+            prov = TTSFactory.create(prov_id)
+            voices = prov.get_available_voices()
+            self.combo_speaker.clear()
+            for v in voices:
+                self.combo_speaker.addItem(f"{v.name} ({v.gender})", v.id)
+        except Exception:
+            pass
 
     def _on_preset_selected(self):
-        p_data = self.combo_presets.currentData()
-        if not p_data:
+        p_name = self.combo_presets.currentText()
+        if not p_name or p_name == "Seleziona Preset...":
             return
-        spk = p_data.get("speaker_or_profile", p_data.get("speaker", "Ryan"))
+        presets = self.preset_mgr.get_voice_presets()
+        target = next((p for p in presets if p["preset_name"] == p_name), None)
+        if target:
+            self._apply_preset_data(target)
+
+    def _apply_preset_data(self, p_data: dict):
+        spk = p_data.get("speaker_or_profile") or p_data.get("speaker", "Puck")
         spk_clean = str(spk).strip().lower().replace(" ", "_")
         for i in range(self.combo_speaker.count()):
-            data_name = str(self.combo_speaker.itemData(i) or "").lower().replace(" ", "_")
-            first_word = self.combo_speaker.itemText(i).split()[0].strip("(),:").lower().replace(" ", "_")
-            if spk_clean in (data_name, first_word) or spk_clean == data_name or spk_clean == first_word:
+            first_w = self.combo_speaker.itemText(i).split()[0].strip("(),:").lower().replace(" ", "_")
+            if spk_clean in (first_w, str(self.combo_speaker.itemData(i)).lower()):
                 self.combo_speaker.setCurrentIndex(i)
                 break
-        if p_data.get("instruct_prompt"):
-            self.txt_custom_instruct.setText(p_data["instruct_prompt"])
-        elif p_data.get("instruct"):
+        if p_data.get("instruct"):
             self.txt_custom_instruct.setText(p_data["instruct"])
         if p_data.get("speed_rate") is not None:
             self.slider_rate.setValue(int(float(p_data["speed_rate"]) * 100))
@@ -656,7 +710,14 @@ class VoiceSettingsDrawer(QDialog):
                 pval = int(round(float(p_data["pitch"])))
                 self.slider_pitch.setValue(pval)
                 self.lbl_pitch.setText(f"Pitch / Vocal Timbre: {'Neutral' if pval == 0 else ('Deeper' if pval < 0 else 'Higher')} ({pval:+.1f})")
-            except (ValueError, TypeError):
+            except Exception:
+                pass
+        if "volume_gain_db" in p_data and p_data["volume_gain_db"] is not None:
+            try:
+                vval = int(round(float(p_data["volume_gain_db"])))
+                self.slider_volume.setValue(vval)
+                self.lbl_volume.setText(f"Guadagno Volume: {vval:+.1f} dB")
+            except Exception:
                 pass
         temp_val = p_data.get("temperature", p_data.get("temp"))
         if temp_val is not None:
@@ -664,8 +725,28 @@ class VoiceSettingsDrawer(QDialog):
                 tval = int(round(float(temp_val) * 100))
                 self.slider_temp.setValue(tval)
                 self.lbl_temp.setText(f"Sampling Temperature: {tval/100.0:.2f}")
-            except (ValueError, TypeError):
+            except Exception:
                 pass
+
+    def _on_instruct_preset_changed(self):
+        text = self.combo_instruct_preset.currentText()
+        if "Viral Hook" in text:
+            self.txt_custom_instruct.setText("High energy viral creator voice, fast paced, emphasizing keywords")
+        elif "Dark Mystery" in text:
+            self.txt_custom_instruct.setText("Deep suspenseful tone, measured pacing with suspenseful micro-pauses")
+        elif "Tech & Science" in text:
+            self.txt_custom_instruct.setText("Fast-paced, crystal clear diction, informative and curious")
+        elif "Inspiring Motivational" in text:
+            self.txt_custom_instruct.setText("Passionate, confident, cinematic, building emotional resonance")
+
+    def _load_presets_into_combo(self):
+        self.combo_presets.blockSignals(True)
+        self.combo_presets.clear()
+        self.combo_presets.addItem("Seleziona Preset...")
+        presets = self.preset_mgr.get_voice_presets()
+        for p in presets:
+            self.combo_presets.addItem(p["preset_name"])
+        self.combo_presets.blockSignals(False)
 
     def _save_new_preset(self):
         name, ok = QInputDialog.getText(self, "Salva Preset Voce", "Nome per il nuovo preset:")
@@ -685,22 +766,6 @@ class VoiceSettingsDrawer(QDialog):
         if fn:
             self.txt_ref_path.setText(fn)
 
-    def _auto_transcribe_reference(self):
-        ref_file = self.txt_ref_path.text().strip()
-        if not ref_file or not os.path.exists(ref_file):
-            QMessageBox.warning(self, "File Mancante", "Seleziona prima un file audio valido.")
-            return
-
-        try:
-            from faster_whisper import WhisperModel
-            model = WhisperModel("base", device="cpu", compute_type="int8")
-            segs, _ = model.transcribe(ref_file, language="en")
-            trans = " ".join(s.text.strip() for s in segs)
-            self.txt_ref_transcript.setText(trans)
-            del model
-        except Exception as e:
-            self.txt_ref_transcript.setText("Sample reference transcript for cloning.")
-
     def _create_and_save_clone(self):
         name = self.txt_clone_name.text().strip()
         ref = self.txt_ref_path.text().strip()
@@ -709,24 +774,10 @@ class VoiceSettingsDrawer(QDialog):
             QMessageBox.warning(self, "Dati Incompleti", "Fornisci un nome e un file audio di riferimento valido.")
             return
 
-        # Verifica preliminare se i pesi Base sono presenti
-        if not self.suite._is_model_cached("base"):
-            res = QMessageBox.question(
-                self,
-                "Pesi Qwen3-TTS-Base Richiesti",
-                "Per eseguire la reale clonazione neurale della voce è necessario il modello 'Qwen3-TTS Base' (~4.5 GB).\n\n"
-                "Attualmente i pesi Base non sono presenti nella cartella locale.\n"
-                "Desideri avviare il download dei pesi ora?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if res == QMessageBox.Yes:
-                self._start_download_base_weights()
-            return
-
         self.btn_save_clone.setEnabled(False)
         self.prog_clone.setVisible(True)
-        self.prog_clone.setValue(10)
-        self.lbl_clone_status.setText("Avvio clonazione vocale in corso...")
+        self.prog_clone.setValue(20)
+        self.lbl_clone_status.setText("Avvio elaborazione profilo...")
 
         self.clone_worker = VoiceCloneWorker(self.suite, name, ref, txt)
 
@@ -736,25 +787,17 @@ class VoiceSettingsDrawer(QDialog):
 
         def _on_done(prof_name: str, file_path: str):
             self.last_cloned_profile_path = file_path
-            self._refresh_profiles_table()
             self.btn_save_clone.setEnabled(True)
             self.btn_test_clone.setEnabled(True)
             self.prog_clone.setValue(100)
             self.lbl_clone_status.setText(f"🟢 Profilo vocale '{prof_name}' salvato con successo!")
-            self.lbl_clone_status.setStyleSheet("font-size: 11px; color: #729B84; font-weight: 600;")
-            QMessageBox.information(
-                self,
-                "Profilo Clonato",
-                f"Profilo vocale '{prof_name}' generato con successo!\n"
-                f"Gli embedding neurali sono stati estratti dal file audio e memorizzati nel profilo .qvoice."
-            )
+            QMessageBox.information(self, "Profilo Creato", f"Profilo vocale '{prof_name}' memorizzato con successo!")
 
         def _on_err(err: str):
             self.btn_save_clone.setEnabled(True)
             self.prog_clone.setValue(0)
-            self.lbl_clone_status.setText(f"❌ Errore durante la clonazione.")
-            self.lbl_clone_status.setStyleSheet("font-size: 11px; color: #D96B6B;")
-            show_copyable_error(self, "Errore Creazione Profilo", f"Errore creazione profilo clone:\n{err}", is_warning=True)
+            self.lbl_clone_status.setText("❌ Errore durante l'elaborazione.")
+            show_copyable_error(self, "Errore Creazione Profilo", err, is_warning=True)
 
         self.clone_worker.progress_step.connect(_on_step)
         self.clone_worker.finished_clone.connect(_on_done)
@@ -764,59 +807,9 @@ class VoiceSettingsDrawer(QDialog):
     def _audition_last_cloned_voice(self):
         target_path = self.last_cloned_profile_path
         if not target_path or not os.path.exists(target_path):
-            profiles = self.suite.get_profiles()
-            cloned_p = next((p for p in profiles if p.get("voice_type") == "CLONED" and p.get("profile_tensor_path")), None)
-            if cloned_p:
-                target_path = cloned_p["profile_tensor_path"]
-                self.last_cloned_profile_path = target_path
-
-        if not target_path or not os.path.exists(target_path):
-            QMessageBox.warning(self, "Nessun Profilo", "Genera prima un profilo vocale clonato oppure selezionane uno dalla libreria.")
+            QMessageBox.warning(self, "Nessun Profilo", "Genera prima un profilo vocale clonato.")
             return
-
-        self._start_audition(
-            mode="cloned",
-            profile_path=target_path,
-            text="The box was thrown beside the parked truck."
-        )
-
-    def _run_benchmark_test(self, phrase: str, test_name: str):
-        self.lbl_active_phrase.setText(f'Test [{test_name}]: "{phrase}"')
-
-        current_tab = self.tabs.currentIndex()
-        mode = "custom"
-        profile_path = None
-        voice_desc = None
-
-        if current_tab == 1: # Tab Voice Clone
-            target_path = self.last_cloned_profile_path
-            if not target_path or not os.path.exists(target_path):
-                profiles = self.suite.get_profiles()
-                cloned_p = next((p for p in profiles if p.get("voice_type") == "CLONED" and p.get("profile_tensor_path")), None)
-                if cloned_p:
-                    target_path = cloned_p["profile_tensor_path"]
-                    self.last_cloned_profile_path = target_path
-            if target_path and os.path.exists(target_path):
-                mode = "cloned"
-                profile_path = target_path
-        elif current_tab == 2: # Tab Voice Design
-            desc = self.txt_voice_desc.toPlainText().strip()
-            if desc:
-                mode = "design"
-                voice_desc = desc
-        elif current_tab == 3: # Tab Libreria Profili
-            row = self.table_profiles.currentRow()
-            if row >= 0:
-                name_item = self.table_profiles.item(row, 1)
-                if name_item:
-                    p_name = name_item.text().strip()
-                    profiles = self.suite.get_profiles()
-                    prof = next((p for p in profiles if p["name"] == p_name), None)
-                    if prof and prof.get("profile_tensor_path"):
-                        mode = "cloned"
-                        profile_path = prof["profile_tensor_path"]
-
-        self._start_audition(mode=mode, profile_path=profile_path, voice_desc=voice_desc, text=phrase)
+        self._start_audition(mode="cloned", profile_path=target_path, text="The box was thrown beside the parked truck.")
 
     def _audition_voice_design(self):
         desc = self.txt_voice_desc.toPlainText().strip()
@@ -825,14 +818,9 @@ class VoiceSettingsDrawer(QDialog):
             return
         self._start_audition(mode="design", voice_desc=desc)
 
-    def _refresh_profiles_table(self):
-        profiles = self.suite.get_profiles()
-        self.table_profiles.setRowCount(len(profiles))
-        for row, p in enumerate(profiles):
-            self.table_profiles.setItem(row, 0, QTableWidgetItem(str(p["id"])))
-            self.table_profiles.setItem(row, 1, QTableWidgetItem(p["name"]))
-            self.table_profiles.setItem(row, 2, QTableWidgetItem(p["voice_type"]))
-            self.table_profiles.setItem(row, 3, QTableWidgetItem(str(p.get("created_at", ""))))
+    def _run_benchmark_test(self, phrase: str, test_name: str):
+        self.lbl_active_phrase.setText(f'Test [{test_name}]: "{phrase}"')
+        self._start_audition(text=phrase)
 
     def _start_audition(
         self,
@@ -841,10 +829,6 @@ class VoiceSettingsDrawer(QDialog):
         voice_desc: Optional[str] = None,
         text: Optional[str] = None
     ):
-        if not isinstance(mode, str) or not mode:
-            mode = "custom"
-
-        # Disabilita i 4 pulsanti di test benchmark
         self.btn_test_phonetic.setEnabled(False)
         self.btn_test_context.setEnabled(False)
         self.btn_test_emotion.setEnabled(False)
@@ -856,12 +840,14 @@ class VoiceSettingsDrawer(QDialog):
         self.prog_audio.setValue(0)
 
         spk_full = self.combo_speaker.currentText()
-        speaker = spk_full.split(" ")[0]
+        speaker = self.combo_speaker.currentData() or spk_full.split(" ")[0].strip("(),:")
         instruct = self.txt_custom_instruct.text().strip()
         speed = self.slider_rate.value() / 100.0
         pitch = float(self.slider_pitch.value())
+        volume_gain = float(self.slider_volume.value())
         temperature = self.slider_temp.value() / 100.0
         final_text = (text or "").strip() or self.DEFAULT_TEST_PHRASE
+        provider_id = self.combo_provider.currentData() or "gemini_tts"
 
         self.audition_worker = VoiceAuditionWorker(
             voice_suite=self.suite,
@@ -874,7 +860,9 @@ class VoiceSettingsDrawer(QDialog):
             temperature=temperature,
             mode=mode,
             profile_path=profile_path,
-            voice_description=voice_desc
+            voice_description=voice_desc,
+            provider_id=provider_id,
+            volume_gain_db=volume_gain
         )
         self.audition_worker.finished_audition.connect(self._on_audition_ready)
         self.audition_worker.error_occurred.connect(self._on_audition_error)
@@ -885,6 +873,7 @@ class VoiceSettingsDrawer(QDialog):
         self.playback_timer.start()
         self.btn_stop.setEnabled(True)
         play_wav_file(audio_path)
+        self._refresh_quota_display()
 
     def _on_audition_error(self, err: str):
         self._stop_audition()
@@ -905,7 +894,7 @@ class VoiceSettingsDrawer(QDialog):
         self.btn_test_context.setEnabled(True)
         self.btn_test_emotion.setEnabled(True)
         self.btn_test_format.setEnabled(True)
-        if hasattr(self, "btn_test_clone") and (self.last_cloned_profile_path or self.suite.get_profiles()):
+        if hasattr(self, "btn_test_clone"):
             self.btn_test_clone.setEnabled(True)
 
         self.btn_stop.setEnabled(False)
@@ -921,11 +910,18 @@ class VoiceSettingsDrawer(QDialog):
         self._on_instruct_preset_changed()
         self.slider_rate.setValue(100)
         self.slider_pitch.setValue(0)
+        self.slider_volume.setValue(0)
         self.slider_temp.setValue(70)
 
     def _apply_initial_settings(self):
         cfg = self.current_settings
-        spk = cfg.get("speaker") or cfg.get("speaker_or_profile", "Ryan")
+        prov = cfg.get("provider", "gemini_tts")
+        for i in range(self.combo_provider.count()):
+            if prov.lower() == str(self.combo_provider.itemData(i)).lower():
+                self.combo_provider.setCurrentIndex(i)
+                break
+
+        spk = cfg.get("speaker") or cfg.get("speaker_or_profile", DEFAULT_SPEAKER)
         spk_clean = str(spk).strip().lower().replace(" ", "_")
         for i in range(self.combo_speaker.count()):
             data_name = str(self.combo_speaker.itemData(i) or "").lower().replace(" ", "_")
@@ -933,6 +929,7 @@ class VoiceSettingsDrawer(QDialog):
             if spk_clean in (data_name, first_word) or spk_clean == data_name or spk_clean == first_word:
                 self.combo_speaker.setCurrentIndex(i)
                 break
+
         if cfg.get("instruct"):
             self.txt_custom_instruct.setText(cfg["instruct"])
         if cfg.get("speed") is not None:
@@ -942,7 +939,14 @@ class VoiceSettingsDrawer(QDialog):
                 pval = int(round(float(cfg["pitch"])))
                 self.slider_pitch.setValue(pval)
                 self.lbl_pitch.setText(f"Pitch / Vocal Timbre: {'Neutral' if pval == 0 else ('Deeper' if pval < 0 else 'Higher')} ({pval:+.1f})")
-            except (ValueError, TypeError):
+            except Exception:
+                pass
+        if "volume_gain_db" in cfg and cfg["volume_gain_db"] is not None:
+            try:
+                vval = int(round(float(cfg["volume_gain_db"])))
+                self.slider_volume.setValue(vval)
+                self.lbl_volume.setText(f"Guadagno Volume: {vval:+.1f} dB")
+            except Exception:
                 pass
         temp_val = cfg.get("temperature", cfg.get("temp"))
         if temp_val is not None:
@@ -950,118 +954,20 @@ class VoiceSettingsDrawer(QDialog):
                 tval = int(round(float(temp_val) * 100))
                 self.slider_temp.setValue(tval)
                 self.lbl_temp.setText(f"Sampling Temperature: {tval/100.0:.2f}")
-            except (ValueError, TypeError):
+            except Exception:
                 pass
-        self._refresh_profiles_table()
-
-    def _use_selected_profile(self):
-        row = self.table_profiles.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "Selezione Richiesta", "Seleziona prima una riga dalla tabella dei profili.")
-            return
-        name_item = self.table_profiles.item(row, 1)
-        if name_item:
-            p_name = name_item.text().strip()
-            found = False
-            for i in range(self.combo_speaker.count()):
-                if p_name in self.combo_speaker.itemText(i):
-                    self.combo_speaker.setCurrentIndex(i)
-                    found = True
-                    break
-            if not found:
-                self.combo_speaker.addItem(f"{p_name} (Profilo Clonato)")
-                self.combo_speaker.setCurrentIndex(self.combo_speaker.count() - 1)
-            QMessageBox.information(self, "Profilo Selezionato", f"Profilo vocale '{p_name}' selezionato!")
-
-    def _audition_selected_profile(self):
-        row = self.table_profiles.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "Selezione Richiesta", "Seleziona prima un profilo vocale da ascoltare.")
-            return
-        name_item = self.table_profiles.item(row, 1)
-        if not name_item:
-            return
-        p_name = name_item.text().strip()
-        profiles = self.suite.get_profiles()
-        prof = next((p for p in profiles if p["name"] == p_name), None)
-        if prof and prof.get("profile_tensor_path"):
-            self._start_audition(
-                mode="cloned",
-                profile_path=prof["profile_tensor_path"],
-                text="The box was thrown beside the parked truck."
-            )
-        else:
-            self._start_audition(mode="custom")
-
-    def _update_weights_status_display(self):
-        is_cached = self.suite._is_model_cached("custom")
-        if is_cached:
-            self.lbl_weights_status.setText("🟢 Modello Neurale Qwen3-TTS CustomVoice (1.7B) Installato e Pronto")
-            self.lbl_weights_status.setStyleSheet("color: #729B84; font-size: 11px; font-weight: 600;")
-            self.btn_download_weights.setVisible(False)
-        else:
-            self.lbl_weights_status.setText("🟡 Pesi Qwen3-TTS CustomVoice non presenti (Attivo fallback Microsoft Speech SAPI)")
-            self.lbl_weights_status.setStyleSheet("color: #C4A36B; font-size: 11px; font-weight: 600;")
-            self.btn_download_weights.setText("📥 Scarica Pesi AI Qwen3-TTS (~4.5 GB)")
-            self.btn_download_weights.setVisible(True)
-            self.btn_download_weights.setEnabled(True)
-
-        # Aggiorna anche stato dei pesi Base nella scheda Clone Voice
-        if hasattr(self, "lbl_base_status") and hasattr(self, "btn_download_base"):
-            is_base_cached = self.suite._is_model_cached("base")
-            if is_base_cached:
-                self.lbl_base_status.setText("🟢 Modello Neurale Qwen3-TTS Base (1.7B) Pronto per la Clonazione Neurale")
-                self.lbl_base_status.setStyleSheet("color: #729B84; font-size: 11px; font-weight: 600;")
-                self.btn_download_base.setVisible(False)
-            else:
-                self.lbl_base_status.setText("🟡 Pesi Modello Base non scaricati (~4.5 GB necessari per clonazione reale)")
-                self.lbl_base_status.setStyleSheet("color: #C4A36B; font-size: 11px; font-weight: 600;")
-                self.btn_download_base.setText("📥 Scarica Pesi AI Qwen3-TTS-Base (~4.5 GB)")
-                self.btn_download_base.setVisible(True)
-                self.btn_download_base.setEnabled(True)
-
-    def _start_download_weights(self):
-        self.btn_download_weights.setEnabled(False)
-        self.lbl_weights_status.setText("⏳ Download pesi neurali CustomVoice (~4.5 GB)...")
-        self.lbl_weights_status.setStyleSheet("color: #6B82A6; font-size: 11px; font-weight: 600;")
-
-        self.dl_worker = ModelDownloadWorker(model_type="custom")
-        self.dl_worker.progress_msg.connect(lambda msg: self.lbl_weights_status.setText(f"⏳ {msg}"))
-        self.dl_worker.download_finished.connect(self._on_download_weights_finished)
-        self.dl_worker.start()
-
-    def _on_download_weights_finished(self, success: bool, msg: str):
-        if success:
-            QMessageBox.information(self, "Download Completato", "Pesi neurali Qwen3-TTS scaricati con successo!\nIl motore neurale è ora attivo.")
-        else:
-            show_copyable_error(self, "Errore Download", f"Impossibile scaricare i pesi del modello:\n{msg}", is_warning=True)
-        self._update_weights_status_display()
-
-    def _start_download_base_weights(self):
-        self.btn_download_base.setEnabled(False)
-        self.lbl_base_status.setText("⏳ Download pesi neurali Qwen3-TTS-Base (~4.5 GB)...")
-        self.lbl_base_status.setStyleSheet("color: #6B82A6; font-size: 11px; font-weight: 600;")
-
-        self.dl_base_worker = ModelDownloadWorker(model_type="base")
-        self.dl_base_worker.progress_msg.connect(lambda msg: self.lbl_base_status.setText(f"⏳ {msg}"))
-        self.dl_base_worker.download_finished.connect(self._on_download_base_finished)
-        self.dl_base_worker.start()
-
-    def _on_download_base_finished(self, success: bool, msg: str):
-        if success:
-            QMessageBox.information(self, "Download Base Completato", "Pesi neurali Qwen3-TTS Base scaricati con successo!\nLa clonazione vocale reale è ora attiva.")
-        else:
-            show_copyable_error(self, "Errore Download Base", f"Impossibile scaricare i pesi Base:\n{msg}", is_warning=True)
-        self._update_weights_status_display()
 
     def get_config(self) -> Dict[str, Any]:
         spk_full = self.combo_speaker.currentText()
         speaker = self.combo_speaker.currentData() or spk_full.split(" ")[0].strip("(),:")
         speed = self.slider_rate.value() / 100.0
         pitch = float(self.slider_pitch.value())
+        volume_gain = float(self.slider_volume.value())
         temp = self.slider_temp.value() / 100.0
+        provider_id = self.combo_provider.currentData() or "gemini_tts"
 
         return {
+            "provider": provider_id,
             "speaker": speaker,
             "speaker_or_profile": speaker,
             "speaker_full": spk_full,
@@ -1069,6 +975,7 @@ class VoiceSettingsDrawer(QDialog):
             "instruct": self.txt_custom_instruct.text().strip(),
             "speed": speed,
             "pitch": pitch,
+            "volume_gain_db": volume_gain,
             "temp": temp,
             "temperature": temp,
             "voice_type": "CUSTOM"

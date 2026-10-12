@@ -1,15 +1,15 @@
-"""AI Short Generator 1.0 - Voice Selector Card Component"""
+"""AI Short Generator 1.0 - Voice Selector Card Component (Gemini Expressive TTS)"""
 
 from typing import Optional, Dict, Any
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QWidget
 )
 from PySide6.QtCore import Signal
-from app.config import DEFAULT_SPEAKER, DEFAULT_INSTRUCT, QWEN_DEFAULT_VOICES
+from app.config import DEFAULT_SPEAKER, DEFAULT_INSTRUCT, GEMINI_DEFAULT_VOICES
 
 
 class VoiceSelectorCard(QFrame):
-    """Card di selezione rapida per la Suite Voce Qwen3-TTS (en-US & Multilingual)."""
+    """Card di selezione rapida per la Suite Vocale Gemini TTS."""
 
     audition_requested = Signal()
     studio_requested = Signal()
@@ -19,12 +19,14 @@ class VoiceSelectorCard(QFrame):
         super().__init__(parent)
         self.setObjectName("CardSurface")
         self._current_config: Dict[str, Any] = {
-            "speaker": "Ryan",
+            "speaker": DEFAULT_SPEAKER,
             "instruct": "Viral Hook (High Energy)",
             "speed": 1.00,
             "pitch": 0.0,
+            "volume_gain_db": 0.0,
             "temperature": 0.70,
-            "temp": 0.70
+            "temp": 0.70,
+            "provider": "gemini_tts"
         }
         self._init_ui()
 
@@ -33,7 +35,7 @@ class VoiceSelectorCard(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
-        header_lbl = QLabel("2. SUITE VOCE QWEN3-TTS (en-US)")
+        header_lbl = QLabel("2. GENERATORE VOCALE (Gemini TTS)")
         header_lbl.setObjectName("SectionHeader")
         layout.addWidget(header_lbl)
 
@@ -41,14 +43,14 @@ class VoiceSelectorCard(QFrame):
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("Speaker:"))
         self.combo_speaker = QComboBox()
-        for v in QWEN_DEFAULT_VOICES:
+        for v in GEMINI_DEFAULT_VOICES:
             self.combo_speaker.addItem(v["display"], v["name"])
         self.combo_speaker.currentIndexChanged.connect(self._on_change)
         row1.addWidget(self.combo_speaker, stretch=1)
 
         row1.addWidget(QLabel("Lingua:"))
         self.combo_lang = QComboBox()
-        self.combo_lang.addItems(["🇺🇸 English (US)"])
+        self.combo_lang.addItems(["🇺🇸 English (US)", "🌐 Multilingual"])
         row1.addWidget(self.combo_lang)
         layout.addLayout(row1)
 
@@ -88,14 +90,13 @@ class VoiceSelectorCard(QFrame):
             "speaker_full": spk_text,
             "language": "English",
             "instruct": style,
-            "type": "Custom Voice"
+            "type": "Gemini Voice",
+            "provider": cfg.get("provider", "gemini_tts")
         })
         if "pitch" not in cfg:
             cfg["pitch"] = 0.0
-        if "temperature" not in cfg:
-            cfg["temperature"] = cfg.get("temp", 0.70)
-        if "temp" not in cfg:
-            cfg["temp"] = cfg.get("temperature", 0.70)
+        if "volume_gain_db" not in cfg:
+            cfg["volume_gain_db"] = 0.0
         if "speed" not in cfg:
             cfg["speed"] = 1.00
         return cfg
@@ -104,8 +105,24 @@ class VoiceSelectorCard(QFrame):
         self.blockSignals(True)
         try:
             self._current_config.update(cfg)
-            spk = cfg.get("speaker") or cfg.get("speaker_or_profile", "Ryan")
+            spk = cfg.get("speaker") or cfg.get("speaker_or_profile", DEFAULT_SPEAKER)
             spk_clean = str(spk).strip().lower().replace(" ", "_")
+
+            # Fallback per mappatura vecchie voci
+            legacy_map = {
+                "ryan": "puck",
+                "aiden": "charon",
+                "vivian": "kore",
+                "serena": "aoede",
+                "dylan": "fenrir",
+                "eric": "puck",
+                "ono_anna": "kore",
+                "sohee": "aoede",
+                "uncle_fu": "charon"
+            }
+            if spk_clean in legacy_map:
+                spk_clean = legacy_map[spk_clean]
+
             found_spk = False
             for i in range(self.combo_speaker.count()):
                 data_name = str(self.combo_speaker.itemData(i) or "").lower().replace(" ", "_")
@@ -127,5 +144,3 @@ class VoiceSelectorCard(QFrame):
                         break
         finally:
             self.blockSignals(False)
-
-

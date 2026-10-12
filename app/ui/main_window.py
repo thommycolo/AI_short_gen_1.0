@@ -30,7 +30,8 @@ from app.core.cancellation_manager import ProductionCancellationManager
 from app.core.batch_allocator import StoryRequirement
 from app.core.vram_orchestrator import VRAMLifecycleOrchestrator, ProductionJob
 from app.core.pre_review_engine import PreProductionReviewEngine, StoryReviewItem
-from app.core.tts_engine import Qwen3VoiceSuite
+from app.core.tts_engine import VoiceIntelligenceEngine, Qwen3VoiceSuite
+from app.config import DEFAULT_SPEAKER
 from app.utils.audio_player import play_wav_file, stop_wav_playback
 from app.utils.logger import log
 
@@ -101,14 +102,16 @@ class MainWindowAuditionWorker(QThread):
 
     def __init__(
         self,
-        voice_suite: Qwen3VoiceSuite,
+        voice_suite: VoiceIntelligenceEngine,
         preset_mgr: PresetManager,
         text: str,
         speaker: str,
         instruct: str,
         speed: float,
         pitch: float = 0.0,
-        temperature: float = 0.70
+        temperature: float = 0.70,
+        provider_id: str = "gemini_tts",
+        volume_gain_db: float = 0.0
     ):
         super().__init__()
         self.voice_suite = voice_suite
@@ -119,6 +122,8 @@ class MainWindowAuditionWorker(QThread):
         self.speed = speed
         self.pitch = pitch
         self.temperature = temperature
+        self.provider_id = provider_id
+        self.volume_gain_db = volume_gain_db
 
     def run(self):
         try:
@@ -134,7 +139,9 @@ class MainWindowAuditionWorker(QThread):
                 speed=self.speed,
                 pitch=self.pitch,
                 temperature=self.temperature,
-                is_preview=True
+                is_preview=True,
+                provider_id=self.provider_id,
+                volume_gain_db=self.volume_gain_db
             )
             if os.path.exists(raw_path) and os.path.getsize(raw_path) > 200:
                 self.preset_mgr.clamp_audio_demo_to_5s(raw_path, clamped_path, max_sec=5.0)
@@ -171,7 +178,7 @@ class MainWindow(QMainWindow):
             cancellation_mgr=self.cancellation_mgr
         )
         self.review_engine = PreProductionReviewEngine()
-        self.voice_suite = Qwen3VoiceSuite()
+        self.voice_suite = VoiceIntelligenceEngine()
         self._audition_worker: Optional[MainWindowAuditionWorker] = None
 
         # Stato di Configurazione Corrente
@@ -179,12 +186,14 @@ class MainWindow(QMainWindow):
         self.active_script_data: Optional[Dict[str, Any]] = None
         self._rendered_complete: bool = False
         self.active_voice_config: Dict[str, Any] = {
-            "speaker": "Ryan",
+            "speaker": DEFAULT_SPEAKER,
             "instruct": "Viral Hook (High Energy)",
             "speed": 1.00,
             "pitch": 0.0,
+            "volume_gain_db": 0.0,
             "temperature": 0.70,
-            "temp": 0.70
+            "temp": 0.70,
+            "provider": "gemini_tts"
         }
         self.active_subtitle_config: Dict[str, Any] = {
             "font_name": "Montserrat Black",
@@ -302,7 +311,7 @@ class MainWindow(QMainWindow):
         self.card_script.clear_requested.connect(self._clear_active_script)
         left_layout.addWidget(self.card_script)
 
-        # Modulo 2: SUITE VOCE QWEN3-TTS (en-US)
+        # Modulo 2: GENERATORE VOCALE (Gemini TTS)
         self.card_voice = VoiceSelectorCard()
         self.card_voice.audition_requested.connect(self._audition_voice_preview)
         self.card_voice.studio_requested.connect(self._open_voice_studio_drawer)
@@ -855,12 +864,16 @@ class MainWindow(QMainWindow):
         pitch = float(self.active_voice_config.get("pitch", 0.0) or 0.0)
         temp = float(self.active_voice_config.get("temperature", self.active_voice_config.get("temp", 0.70)) or 0.70)
 
+        volume = float(self.active_voice_config.get("volume_gain_db", 0.0) or 0.0)
+        provider_id = self.active_voice_config.get("provider", "gemini_tts")
+
         self.log_event(f"Provino vocale 5.0s ({speaker}): Sintesi e riproduzione in corso...")
         self.card_voice.btn_audition.setEnabled(False)
         self.card_voice.btn_audition.setText("⏳ Generazione...")
 
         self._audition_worker = MainWindowAuditionWorker(
-            self.voice_suite, self.preset_mgr, text_sample, speaker, instruct, speed, pitch, temp
+            self.voice_suite, self.preset_mgr, text_sample, speaker, instruct,
+            speed, pitch, temp, provider_id=provider_id, volume_gain_db=volume
         )
 
         def _on_ready(path: str):

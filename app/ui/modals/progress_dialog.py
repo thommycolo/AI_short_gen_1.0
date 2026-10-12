@@ -175,7 +175,7 @@ class ProductionProgressDialog(QDialog):
 
         # 4 Fasi orizzontali
         phases_row = QHBoxLayout()
-        self.step_tts = QLabel("[ 1. VOCE QWEN3 ]\n⏳ IN ATTESA")
+        self.step_tts = QLabel("[ 1. SINTESI VOCALE ]\n⏳ IN ATTESA")
         self.step_whisper = QLabel("[ 2. SOTTOTITOLI ]\n⏳ IN ATTESA")
         self.step_bgm = QLabel("[ 3. DUCKING BGM ]\n⏳ IN ATTESA")
         self.step_render = QLabel("[ 4. RENDER NVENC ]\n⏳ IN ATTESA")
@@ -219,7 +219,7 @@ class ProductionProgressDialog(QDialog):
         """Aggiorna lo stato della fase attiva e la percentuale del passo corrente."""
         self.prog_current_step.setValue(int(pct))
         phases = [
-            (self.step_tts, "[ 1. VOCE QWEN3 ]"),
+            (self.step_tts, "[ 1. SINTESI VOCALE ]"),
             (self.step_whisper, "[ 2. SOTTOTITOLI ]"),
             (self.step_bgm, "[ 3. DUCKING BGM ]"),
             (self.step_render, "[ 4. RENDER NVENC ]")
@@ -235,7 +235,7 @@ class ProductionProgressDialog(QDialog):
                 lbl.setText(f"{name}\n⏳ IN ATTESA")
                 lbl.setStyleSheet("background-color: #1A1C22; color: #666E7F; border-radius: 4px; padding: 6px;")
 
-        phase_names = ["Sintesi Vocale Qwen3-TTS", "Allineamento Sottotitoli Whisper", "Mastering Audio & BGM", "Montaggio Hardware NVENC"]
+        phase_names = ["Sintesi Vocale Gemini TTS", "Allineamento Sottotitoli Whisper", "Mastering Audio & BGM", "Montaggio Hardware NVENC"]
         p_name = phase_names[phase_idx] if 0 <= phase_idx < len(phase_names) else f"Fase {phase_idx+1}"
         self.lbl_console.setText(f"[{time.strftime('%H:%M:%S')}] {p_name} ({pct:.0f}%) in esecuzione...")
 
@@ -255,7 +255,7 @@ class ProductionProgressDialog(QDialog):
         self.lbl_current_story.setText("✅ Produzione terminata con successo!")
         self.lbl_console.setText(f"[{time.strftime('%H:%M:%S')}] Tutti i {total_completed} Short sono pronti nella cartella renders.")
         for lbl, name in [
-            (self.step_tts, "[ 1. VOCE QWEN3 ]"),
+            (self.step_tts, "[ 1. SINTESI VOCALE ]"),
             (self.step_whisper, "[ 2. SOTTOTITOLI ]"),
             (self.step_bgm, "[ 3. DUCKING BGM ]"),
             (self.step_render, "[ 4. RENDER NVENC ]")
@@ -278,10 +278,10 @@ class ProductionProgressDialog(QDialog):
 
         # Aggiorna badge stepper
         if "Vocale" in phase_name:
-            self.step_tts.setText("[ 1. VOCE QWEN3 ]\n⚡ IN CORSO")
+            self.step_tts.setText("[ 1. SINTESI VOCALE ]\n⚡ IN CORSO")
             self.step_tts.setStyleSheet("background-color: #2F3B4F; color: #DCE0EA; border-radius: 4px; padding: 6px;")
         elif "Sottotitoli" in phase_name:
-            self.step_tts.setText("[ 1. VOCE QWEN3 ]\n✅ COMPLETATO")
+            self.step_tts.setText("[ 1. SINTESI VOCALE ]\n✅ COMPLETATO")
             self.step_tts.setStyleSheet("background-color: #22382D; color: #729B84; border-radius: 4px; padding: 6px;")
             self.step_whisper.setText("[ 2. SOTTOTITOLI ]\n⚡ IN CORSO")
             self.step_whisper.setStyleSheet("background-color: #2F3B4F; color: #DCE0EA; border-radius: 4px; padding: 6px;")

@@ -324,7 +324,7 @@ class TestCapillaryModules(unittest.TestCase):
 
         # Test avanzamento fasi
         dialog.update_active_phase(0, 10.0)
-        self.assertIn("VOCE QWEN3", dialog.step_tts.text())
+        self.assertIn("SINTESI VOCALE", dialog.step_tts.text())
 
         dialog.update_active_phase(1, 35.0)
         self.assertIn("SOTTOTITOLI", dialog.step_whisper.text())

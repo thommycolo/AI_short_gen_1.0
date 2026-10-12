@@ -1,4 +1,4 @@
-"""Tests for Qwen supported default voices and Pitch / Sampling Temperature persistence."""
+"""Tests for Gemini supported voices, backward compatibility, and Pitch / Sampling Temperature / Volume persistence."""
 
 import sys
 import unittest
@@ -9,17 +9,17 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from PySide6.QtWidgets import QApplication
 from app.config import (
-    QWEN_DEFAULT_VOICES, QWEN_SUPPORTED_SPEAKER_IDS,
-    QWEN_SPEAKER_NAMES, QWEN_SPEAKER_DISPLAY_MAP
+    GEMINI_DEFAULT_VOICES, GEMINI_SUPPORTED_SPEAKER_IDS,
+    GEMINI_SPEAKER_NAMES, GEMINI_SPEAKER_DISPLAY_MAP
 )
 from app.core.preset_manager import PresetManager
-from app.core.tts_engine import Qwen3VoiceSuite
+from app.core.tts_engine import VoiceIntelligenceEngine, Qwen3VoiceSuite
 from app.ui.components.voice_selector import VoiceSelectorCard
 from app.ui.drawers.voice_settings_drawer import VoiceSettingsDrawer
 from app.ui.main_window import MainWindow, MainWindowAuditionWorker
 
 
-class TestQwenVoicesAndPitchTemp(unittest.TestCase):
+class TestGeminiVoicesAndPitchTemp(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -27,35 +27,35 @@ class TestQwenVoicesAndPitchTemp(unittest.TestCase):
         if cls.app is None:
             cls.app = QApplication(sys.argv)
 
-    def test_01_all_nine_qwen_default_voices_configured(self):
-        """Verifica che tutte le 9 voci supportate di default da Qwen3-TTS siano configurate."""
-        self.assertEqual(len(QWEN_DEFAULT_VOICES), 9)
+    def test_01_all_gemini_default_voices_configured(self):
+        """Verifica che tutte le voci supportate di default da Gemini TTS siano configurate."""
+        self.assertEqual(len(GEMINI_DEFAULT_VOICES), 5)
 
-        expected_ids = {"ryan", "aiden", "vivian", "serena", "dylan", "eric", "ono_anna", "sohee", "uncle_fu"}
-        configured_ids = {v["id"] for v in QWEN_DEFAULT_VOICES}
+        expected_ids = {"Puck", "Charon", "Kore", "Fenrir", "Aoede"}
+        configured_ids = {v["id"] for v in GEMINI_DEFAULT_VOICES}
         self.assertEqual(configured_ids, expected_ids)
 
-        expected_names = {"Ryan", "Aiden", "Vivian", "Serena", "Dylan", "Eric", "Ono_Anna", "Sohee", "Uncle_Fu"}
-        configured_names = set(QWEN_SPEAKER_NAMES)
+        expected_names = {"Puck", "Charon", "Kore", "Fenrir", "Aoede"}
+        configured_names = set(GEMINI_SPEAKER_NAMES)
         self.assertEqual(configured_names, expected_names)
 
-    def test_02_voice_selector_card_has_all_qwen_voices(self):
-        """Verifica che VoiceSelectorCard mostri tutte le 9 voci nel dropdown dello speaker."""
+    def test_02_voice_selector_card_has_gemini_voices(self):
+        """Verifica che VoiceSelectorCard mostri le voci Gemini nel dropdown dello speaker."""
         card = VoiceSelectorCard()
         items = [card.combo_speaker.itemText(i) for i in range(card.combo_speaker.count())]
         item_speakers = [txt.split()[0].lower() for txt in items]
 
-        expected_speakers = ["ryan", "aiden", "vivian", "serena", "dylan", "eric", "ono_anna", "sohee", "uncle_fu"]
+        expected_speakers = ["puck", "charon", "kore", "fenrir", "aoede"]
         for spk in expected_speakers:
             self.assertIn(spk, item_speakers, f"Speaker {spk} non presente in VoiceSelectorCard")
 
-    def test_03_voice_settings_drawer_has_all_qwen_voices(self):
-        """Verifica che VoiceSettingsDrawer mostri tutte le 9 voci nel dropdown dello speaker."""
+    def test_03_voice_settings_drawer_has_gemini_voices(self):
+        """Verifica che VoiceSettingsDrawer mostri le voci Gemini nel dropdown dello speaker."""
         drawer = VoiceSettingsDrawer()
         items = [drawer.combo_speaker.itemText(i) for i in range(drawer.combo_speaker.count())]
         item_speakers = [txt.split()[0].lower() for txt in items]
 
-        expected_speakers = ["ryan", "aiden", "vivian", "serena", "dylan", "eric", "ono_anna", "sohee", "uncle_fu"]
+        expected_speakers = ["puck", "charon", "kore", "fenrir", "aoede"]
         for spk in expected_speakers:
             self.assertIn(spk, item_speakers, f"Speaker {spk} non presente in VoiceSettingsDrawer")
 
@@ -68,7 +68,7 @@ class TestQwenVoicesAndPitchTemp(unittest.TestCase):
         try:
             pm = PresetManager(db_path=tmp_db)
             cfg = {
-                "speaker": "Dylan",
+                "speaker": "Fenrir",
                 "instruct": "High energy test",
                 "speed": 1.15,
                 "pitch": -2.0,
@@ -79,7 +79,7 @@ class TestQwenVoicesAndPitchTemp(unittest.TestCase):
             presets = pm.get_voice_presets()
             saved = next((p for p in presets if p["preset_name"] == "Test_Preset_PitchTemp"), None)
             self.assertIsNotNone(saved)
-            self.assertEqual(saved["speaker_or_profile"], "Dylan")
+            self.assertEqual(saved["speaker_or_profile"], "Fenrir")
             self.assertAlmostEqual(saved["pitch"], -2.0)
             self.assertAlmostEqual(saved["temperature"], 0.85)
             self.assertAlmostEqual(saved["speed_rate"], 1.15)
@@ -92,17 +92,18 @@ class TestQwenVoicesAndPitchTemp(unittest.TestCase):
     def test_05_voice_settings_drawer_restores_pitch_and_temp_on_init(self):
         """Verifica che VoiceSettingsDrawer applichi pitch e temperature passati in current_settings."""
         current_cfg = {
-            "speaker": "Eric",
+            "speaker": "Charon",
             "instruct": "Action pacing",
             "speed": 1.20,
             "pitch": 3.0,
+            "volume_gain_db": 2.0,
             "temperature": 0.85
         }
         drawer = VoiceSettingsDrawer(current_settings=current_cfg)
 
-        # Verifica speaker impostato a Eric
+        # Verifica speaker impostato a Charon
         current_spk = drawer.combo_speaker.currentText().split()[0].lower()
-        self.assertEqual(current_spk, "eric")
+        self.assertEqual(current_spk, "charon")
 
         # Verifica slider pitch impostato a 3
         self.assertEqual(drawer.slider_pitch.value(), 3)
@@ -114,8 +115,9 @@ class TestQwenVoicesAndPitchTemp(unittest.TestCase):
 
         # Verifica che get_config restituisca i valori impostati
         out_cfg = drawer.get_config()
-        self.assertEqual(out_cfg["speaker"], "Eric")
+        self.assertEqual(out_cfg["speaker"], "Charon")
         self.assertAlmostEqual(out_cfg["pitch"], 3.0)
+        self.assertAlmostEqual(out_cfg["volume_gain_db"], 2.0)
         self.assertAlmostEqual(out_cfg["temperature"], 0.85)
         self.assertAlmostEqual(out_cfg["temp"], 0.85)
 
@@ -127,8 +129,8 @@ class TestQwenVoicesAndPitchTemp(unittest.TestCase):
 
         try:
             pm = PresetManager(db_path=tmp_db)
-            pm.save_voice_preset("Preset_Deep_UncleFu", {
-                "speaker": "Uncle_Fu",
+            pm.save_voice_preset("Preset_Deep_Charon", {
+                "speaker": "Charon",
                 "instruct": "Deep trailer voice",
                 "speed": 0.90,
                 "pitch": -3.0,
@@ -137,23 +139,21 @@ class TestQwenVoicesAndPitchTemp(unittest.TestCase):
 
             drawer = VoiceSettingsDrawer(preset_mgr=pm)
 
-            # Trova l'indice del preset appena salvato
             target_idx = -1
             for i in range(drawer.combo_presets.count()):
-                if "Preset_Deep_UncleFu" in drawer.combo_presets.itemText(i):
+                if "Preset_Deep_Charon" in drawer.combo_presets.itemText(i):
                     target_idx = i
                     break
 
             self.assertGreaterEqual(target_idx, 0, "Preset non trovato nel combo")
             drawer.combo_presets.setCurrentIndex(target_idx)
 
-            # Verifica aggiornamento controlli
             self.assertEqual(drawer.slider_pitch.value(), -3)
             self.assertEqual(drawer.slider_temp.value(), 60)
             self.assertAlmostEqual(drawer.slider_rate.value() / 100.0, 0.90)
 
             out_cfg = drawer.get_config()
-            self.assertEqual(out_cfg["speaker"], "Uncle_Fu")
+            self.assertEqual(out_cfg["speaker"], "Charon")
             self.assertAlmostEqual(out_cfg["pitch"], -3.0)
             self.assertAlmostEqual(out_cfg["temperature"], 0.60)
         finally:
@@ -166,35 +166,33 @@ class TestQwenVoicesAndPitchTemp(unittest.TestCase):
         """Verifica che VoiceSelectorCard non perda pitch e temperature quando l'utente cambia opzioni."""
         card = VoiceSelectorCard()
         card.set_config({
-            "speaker": "Vivian",
+            "speaker": "Kore",
             "pitch": 1.0,
             "temperature": 0.78,
             "speed": 1.05
         })
 
-        # Cambio speaker su Aiden
+        # Cambio speaker su Charon
         for i in range(card.combo_speaker.count()):
-            if "aiden" in card.combo_speaker.itemText(i).lower():
+            if "charon" in card.combo_speaker.itemText(i).lower():
                 card.combo_speaker.setCurrentIndex(i)
                 break
 
         cfg = card.get_config()
-        self.assertEqual(cfg["speaker"], "Aiden")
-        # Pitch e temperature devono rimanere preservati
+        self.assertEqual(cfg["speaker"], "Charon")
         self.assertAlmostEqual(cfg["pitch"], 1.0)
         self.assertAlmostEqual(cfg["temperature"], 0.78)
         self.assertAlmostEqual(cfg["speed"], 1.05)
 
-    def test_08_tts_engine_supports_all_qwen_speakers(self):
-        """Verifica che Qwen3VoiceSuite riconosca e risolva tutti i 9 speaker Qwen nativi."""
-        suite = Qwen3VoiceSuite()
-        speakers_to_test = ["ryan", "aiden", "vivian", "serena", "dylan", "eric", "ono_anna", "sohee", "uncle_fu"]
-        for spk in speakers_to_test:
-            spk_clean = spk.strip().lower().replace(" ", "_")
-            supported_speakers = {"aiden", "dylan", "eric", "ono_anna", "ryan", "serena", "sohee", "uncle_fu", "vivian"}
-            self.assertIn(spk_clean, supported_speakers)
+    def test_08_tts_engine_supports_speakers_and_compatibility(self):
+        """Verifica che VoiceIntelligenceEngine riconosca i profili voce."""
+        engine = VoiceIntelligenceEngine()
+        profiles = engine.get_profiles()
+        self.assertTrue(len(profiles) >= 5)
+        prof_ids = [p["id"] for p in profiles]
+        self.assertIn("Puck", prof_ids)
+        self.assertIn("Charon", prof_ids)
 
 
 if __name__ == "__main__":
     unittest.main()
-

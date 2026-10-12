@@ -36,7 +36,7 @@ class DiscourseCoherenceChunker:
         return self._nlp
 
     def enhance_speech_text(self, text: str) -> str:
-        """Applica le regole di formattazione ritmica per la narrazione di Qwen3-TTS."""
+        """Applica le regole di formattazione ritmica per la narrazione di Gemini TTS."""
         text = re.sub(r'\s*;\s*', ', ', text)
         text = re.sub(r'\s*:\s*', '... ', text)
         text = re.sub(r'\s*[—–]\s*', ', ', text)

@@ -16,7 +16,7 @@ from app.config import (
     PADDING_TOTAL_SEC, OUTRO_PAUSE_SEC, VRAM_APP_NET_BUDGET_MB, VRAM_MAX_CEILING_MB,
     TARGET_VIDEO_MAX_SEC, ALLOWED_CHUNKING_DELTA_SEC, DEFAULT_WPS
 )
-from app.core.tts_engine import Qwen3VoiceSuite
+from app.core.tts_engine import VoiceIntelligenceEngine, Qwen3VoiceSuite
 from app.core.discourse_chunker import DiscourseCoherenceChunker
 from app.core.silero_vad_trimmer import SileroVADSilenceTrimmer
 from app.core.subtitle_generator import SubtitleGenerator
@@ -35,40 +35,46 @@ except ImportError:
 
 # Worker function for Phase A (TTS)
 def _tts_worker_proc(task_data: dict, result_queue: multiprocessing.Queue):
-    """Eseguito in processo isolato (spawn): alla chiusura, Windows WDDM bonifica 100% VRAM."""
+    """Eseguito in processo isolato (spawn) per la sintesi vocale modulare."""
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     try:
         text = task_data["text"]
         out_wav = task_data["output_wav"]
-        speaker = task_data.get("speaker", "Ryan")
+        speaker = task_data.get("speaker", "Puck")
         instruct = task_data.get("instruct", "")
         speed = float(task_data.get("speed", 1.0))
         pitch = float(task_data.get("pitch", 0.0) or 0.0)
+        volume = float(task_data.get("volume_gain_db", task_data.get("volume", 0.0)) or 0.0)
         temp = float(task_data.get("temperature", task_data.get("temp", 0.70)) or 0.70)
+        provider_id = task_data.get("provider", task_data.get("provider_id", "gemini_tts"))
         outro_text = task_data.get("outro_text", "")
         outro_wav = task_data.get("outro_wav", "")
 
-        suite = Qwen3VoiceSuite()
-        measured_narr_dur = suite.generate_custom(
+        engine = VoiceIntelligenceEngine(default_provider_id=provider_id)
+        measured_narr_dur = engine.generate_custom(
             text=text,
             output_path=out_wav,
             speaker=speaker,
             instruct=instruct,
             speed=speed,
             pitch=pitch,
-            temperature=temp
+            temperature=temp,
+            provider_id=provider_id,
+            volume_gain_db=volume
         )
 
         measured_outro_dur = 0.0
         if outro_text and outro_wav:
-            measured_outro_dur = suite.generate_custom(
+            measured_outro_dur = engine.generate_custom(
                 text=outro_text,
                 output_path=outro_wav,
                 speaker=speaker,
                 instruct=instruct,
                 speed=speed,
                 pitch=pitch,
-                temperature=temp
+                temperature=temp,
+                provider_id=provider_id,
+                volume_gain_db=volume
             )
 
         result_queue.put({
@@ -329,9 +335,9 @@ class VRAMLifecycleOrchestrator:
                 if self.cancellation_mgr.is_cancelled():
                     raise InterruptedError("Produzione interrotta dall'utente.")
 
-                # --- FASE 1: SINTESI VOCALE QWEN3-TTS & GROUND TRUTH ---
+                # --- FASE 1: SINTESI VOCALE GEMINI TTS & GROUND TRUTH ---
                 if on_step_progress:
-                    on_step_progress(part_num, "Sintesi Vocale Qwen3-TTS", 10.0)
+                    on_step_progress(part_num, "Sintesi Vocale Gemini TTS", 10.0)
 
                 # Definizione testo finale (Outro CTA letto da TTS)
                 custom_outros = timing_cfg.get("custom_outros")
