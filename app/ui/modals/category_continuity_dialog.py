@@ -17,7 +17,6 @@ class CategoryContinuityWarningDialog(QDialog):
     """
 
     ACTION_CHANGE_CATEGORY = "CHANGE_CATEGORY"
-    ACTION_IMPORT_LOCAL = "IMPORT_LOCAL"
     ACTION_DOWNLOAD_YT = "DOWNLOAD_YT"
 
     def __init__(
@@ -68,7 +67,7 @@ class CategoryContinuityWarningDialog(QDialog):
         rule_box = QLabel(
             "REGOLA DI CONTINUITÀ TEMATICA:\n"
             "I video di una storia possono provenire da più file master purché condividano la STESSA "
-            "categoria tematica (es. due gameplay di Minecraft o Subway Surfers)."
+            "categoria tematica."
         )
         rule_box.setStyleSheet("color: #949CAE; font-size: 11px;")
         rule_box.setWordWrap(True)
@@ -77,8 +76,8 @@ class CategoryContinuityWarningDialog(QDialog):
 
         lbl_opts = QLabel(
             "OPZIONI DISPONIBILI:\n"
-            f"1. Aggiungi un nuovo video alla categoria \"{self.category}\" (Drag & Drop o YouTube).\n"
-            "2. Assegna la storia a una categoria differente (es. \"Subway Surfers\", \"GTA V\" o \"General\")."
+            f"1. Scarica un nuovo video per la categoria \"{self.category}\" tramite link YouTube.\n"
+            "2. Assegna la storia a una categoria differente."
         )
         lbl_opts.setStyleSheet("color: #666E7F; font-size: 11px;")
         lbl_opts.setWordWrap(True)
@@ -94,10 +93,6 @@ class CategoryContinuityWarningDialog(QDialog):
 
         btn_bar.addStretch()
 
-        btn_local = QPushButton("📁 Importa Locale")
-        btn_local.clicked.connect(self._on_import_local)
-        btn_bar.addWidget(btn_local)
-
         btn_yt = QPushButton("⬇️ Scarica da YouTube")
         btn_yt.setObjectName("PrimaryButton")
         btn_yt.clicked.connect(self._on_download_yt)
@@ -107,10 +102,6 @@ class CategoryContinuityWarningDialog(QDialog):
 
     def _on_change_category(self):
         self.chosen_action = self.ACTION_CHANGE_CATEGORY
-        self.accept()
-
-    def _on_import_local(self):
-        self.chosen_action = self.ACTION_IMPORT_LOCAL
         self.accept()
 
     def _on_download_yt(self):

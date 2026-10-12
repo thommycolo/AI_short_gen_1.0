@@ -102,10 +102,10 @@ class ContinuousBatchFeasibilitySolver:
             best_source_id = None
             min_waste = float("inf")
 
-            # 1. Ricerca candidati con categoria coincidente (o General)
+            # 1. Ricerca candidati con categoria coincidente
             candidates = {
                 sid: data for sid, data in virtual_pool.items()
-                if (data["category"] == story.category or story.category == "General" or data["category"] == "General")
+                if data["category"] == story.category
                 and data["available"] >= req_sec
             }
 

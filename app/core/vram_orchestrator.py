@@ -164,6 +164,7 @@ class ProductionJob:
     bgm_config: Optional[dict] = None
     speed_rate: float = 1.0
     timing_config: Optional[dict] = None
+    source_id: Optional[int] = None
 
 
 class VRAMLifecycleOrchestrator:
@@ -337,7 +338,7 @@ class VRAMLifecycleOrchestrator:
 
                 # --- FASE 1: SINTESI VOCALE GEMINI TTS & GROUND TRUTH ---
                 if on_step_progress:
-                    on_step_progress(part_num, "Sintesi Vocale Gemini TTS", 10.0)
+                    on_step_progress(part_num, "Sintesi Vocale", 10.0)
 
                 # Definizione testo finale (Outro CTA letto da TTS)
                 custom_outros = timing_cfg.get("custom_outros")
@@ -406,17 +407,33 @@ class VRAMLifecycleOrchestrator:
                     on_step_progress(part_num, "Prenotazione Video Continuo & BGM", 60.0)
 
                 # --- FASE 3: RISERVA SEGMENTO CONTINUO DAL VIDEO POOL ---
-                candidate_sources = self.video_manager.get_sources(category=job.category)
-                if not candidate_sources:
-                    candidate_sources = self.video_manager.get_sources(category="General")
-                if not candidate_sources:
-                    candidate_sources = self.video_manager.get_all_sources()
+                # Seleziona in automatico o tramite preferenza il video idoneo appartenente alla categoria scelta
+                eligible = []
+                if job.source_id:
+                    s_pref = self.video_manager.get_source_by_id(job.source_id)
+                    if s_pref and s_pref.get("category") == job.category and s_pref.get("status") in ("DISPONIBILE", "PARZIALMENTE_USATO"):
+                        if s_pref.get("available_duration_sec", 0.0) >= video_needed_dur or self.video_manager.find_free_interval_in_pool(s_pref["id"], video_needed_dur):
+                            eligible = [s_pref]
+                if not eligible:
+                    opt = self.video_manager.find_optimal_source_for_category(job.category, video_needed_dur)
+                    if opt:
+                        eligible = [opt]
+                if not eligible:
+                    eligible = [
+                        s for s in self.video_manager.get_sources(category=job.category)
+                        if s["available_duration_sec"] >= video_needed_dur or self.video_manager.find_free_interval_in_pool(s["id"], video_needed_dur)
+                    ]
+                if not eligible:
+                    eligible = self.video_manager.get_sources(category=job.category)
 
-                if not candidate_sources:
-                    raise RuntimeError("Nessuna sorgente video disponibile nel Video Pool.")
+                if not eligible and (not job.category or job.category == "General"):
+                    eligible = self.video_manager.get_all_sources()
 
-                src_id = candidate_sources[0]["id"]
-                src_path = candidate_sources[0]["file_path"]
+                if not eligible:
+                    raise RuntimeError(f"Nessuna sorgente video con durata sufficiente ({video_needed_dur:.1f}s) disponibile nel Video Pool per la categoria '{job.category}'.")
+
+                src_id = eligible[0]["id"]
+                src_path = eligible[0]["file_path"]
 
                 # Riserva segmento continuo
                 start_t, end_t = self.video_manager.reserve_segment_for_story(

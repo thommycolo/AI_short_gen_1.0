@@ -156,7 +156,7 @@ class VoiceSettingsDrawer(QDialog):
         self.current_settings = current_settings or {}
         self.active_story_title = active_story_title
 
-        self.setWindowTitle("VOICE STUDIO & IMPOSTAZIONI SINTESI VOCALE (Gemini TTS)")
+        self.setWindowTitle("VOICE STUDIO & IMPOSTAZIONI SINTESI VOCALE")
         self.resize(860, 750)
         self.setObjectName("DrawerWindow")
 
@@ -180,7 +180,7 @@ class VoiceSettingsDrawer(QDialog):
 
         # Header Bar
         header_bar = QHBoxLayout()
-        lbl_title = QLabel("VOICE STUDIO & IMPOSTAZIONI SINTESI VOCALE (Gemini TTS)")
+        lbl_title = QLabel("VOICE STUDIO & IMPOSTAZIONI SINTESI VOCALE")
         lbl_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #DCE0EA;")
         header_bar.addWidget(lbl_title)
         header_bar.addStretch()
@@ -230,17 +230,14 @@ class VoiceSettingsDrawer(QDialog):
         wc_layout.addWidget(self.btn_download_weights)
         main_layout.addWidget(self.weights_card)
 
-        # Tabs Container (4 Tab conformi alla suite)
+        # Tabs Container (Voci Standard e Impostazioni API & Quota)
         self.tabs = QTabWidget()
         self.tab1 = self._build_tab1_presets()
-        self.tab2 = self._build_tab2_clone()
-        self.tab3 = self._build_tab3_design()
-        self.tab4 = self._build_tab4_api_quota()
+        self.tab2 = self._build_tab4_api_quota()
+        self.tab4 = self.tab2  # Retrocompatibilità
 
         self.tabs.addTab(self.tab1, "VOCI STANDARD & PARAMETRI")
-        self.tabs.addTab(self.tab2, "VOICE CLONE")
-        self.tabs.addTab(self.tab3, "VOICE DESIGN")
-        self.tabs.addTab(self.tab4, "IMPOSTAZIONI API & QUOTA 95%")
+        self.tabs.addTab(self.tab2, "IMPOSTAZIONI API & QUOTA 95%")
         main_layout.addWidget(self.tabs, stretch=1)
 
         # Banco di Prova Benchmark Vocale (4 Test Benchmark Standard, Clamped a 5.0s)
@@ -419,78 +416,6 @@ class VoiceSettingsDrawer(QDialog):
         fb_layout.addLayout(row_temp)
 
         layout.addWidget(fines_box)
-        layout.addStretch()
-        return widget
-
-    def _build_tab2_clone(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-
-        self.base_weights_card = QFrame()
-        self.base_weights_card.setObjectName("InnerCard")
-        bwc_layout = QVBoxLayout(self.base_weights_card)
-        bwc_layout.addWidget(QLabel("REPLICAZIONE VOCALE & SPEAKER CLONING:"))
-        layout.addWidget(self.base_weights_card)
-
-        r1 = QHBoxLayout()
-        r1.addWidget(QLabel("Nome Profilo:"))
-        self.txt_clone_name = QLineEdit("My_Custom_Clone")
-        r1.addWidget(self.txt_clone_name, stretch=1)
-        layout.addLayout(r1)
-
-        r2 = QHBoxLayout()
-        r2.addWidget(QLabel("Audio di Riferimento:"))
-        self.txt_ref_path = QLineEdit()
-        r2.addWidget(self.txt_ref_path, stretch=1)
-        btn_browse = QPushButton("Sfoglia File...")
-        btn_browse.clicked.connect(self._browse_ref_audio)
-        r2.addWidget(btn_browse)
-        layout.addLayout(r2)
-
-        layout.addWidget(QLabel("Trascrizione Audio:"))
-        self.txt_ref_transcript = QTextEdit()
-        self.txt_ref_transcript.setMaximumHeight(70)
-        layout.addWidget(self.txt_ref_transcript)
-
-        self.prog_clone = QProgressBar()
-        self.prog_clone.setVisible(False)
-        layout.addWidget(self.prog_clone)
-
-        self.lbl_clone_status = QLabel("Pronto per l'estrazione profilo.")
-        self.lbl_clone_status.setStyleSheet("font-size: 11px; color: #949CAE;")
-        layout.addWidget(self.lbl_clone_status)
-
-        act_row = QHBoxLayout()
-        self.btn_save_clone = QPushButton("✨ Salva Profilo Vocale")
-        self.btn_save_clone.clicked.connect(self._create_and_save_clone)
-        act_row.addWidget(self.btn_save_clone)
-
-        self.btn_test_clone = QPushButton("▶ Ascolta Profilo Clonato")
-        self.btn_test_clone.clicked.connect(self._audition_last_cloned_voice)
-        act_row.addWidget(self.btn_test_clone)
-        layout.addLayout(act_row)
-
-        layout.addStretch()
-        return widget
-
-    def _build_tab3_design(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-
-        layout.addWidget(QLabel("DESIGN VOCALE GENERATIVO (Prompt Sintetico):"))
-        self.txt_voice_desc = QTextEdit()
-        self.txt_voice_desc.setPlaceholderText("Es: A charismatic American tech storyteller in his early 30s, warm and articulate...")
-        self.txt_voice_desc.setMaximumHeight(90)
-        layout.addWidget(self.txt_voice_desc)
-
-        btn_test_design = QPushButton("▶ Genera & Ascolta Voce Creata")
-        btn_test_design.clicked.connect(self._audition_voice_design)
-        layout.addWidget(btn_test_design)
-
         layout.addStretch()
         return widget
 
@@ -761,63 +686,6 @@ class VoiceSettingsDrawer(QDialog):
         self.apply_to_all_requested.emit(cfg)
         QMessageBox.information(self, "Propagazione Eseguita", "Questa configurazione vocale è stata propagata a tutte le storie in coda.")
 
-    def _browse_ref_audio(self):
-        fn, _ = QFileDialog.getOpenFileName(self, "Seleziona Audio di Riferimento", "", "Audio Files (*.wav *.mp3 *.m4a)")
-        if fn:
-            self.txt_ref_path.setText(fn)
-
-    def _create_and_save_clone(self):
-        name = self.txt_clone_name.text().strip()
-        ref = self.txt_ref_path.text().strip()
-        txt = self.txt_ref_transcript.toPlainText().strip()
-        if not name or not ref or not os.path.exists(ref):
-            QMessageBox.warning(self, "Dati Incompleti", "Fornisci un nome e un file audio di riferimento valido.")
-            return
-
-        self.btn_save_clone.setEnabled(False)
-        self.prog_clone.setVisible(True)
-        self.prog_clone.setValue(20)
-        self.lbl_clone_status.setText("Avvio elaborazione profilo...")
-
-        self.clone_worker = VoiceCloneWorker(self.suite, name, ref, txt)
-
-        def _on_step(pct: int, msg: str):
-            self.prog_clone.setValue(pct)
-            self.lbl_clone_status.setText(f"⏳ {msg}")
-
-        def _on_done(prof_name: str, file_path: str):
-            self.last_cloned_profile_path = file_path
-            self.btn_save_clone.setEnabled(True)
-            self.btn_test_clone.setEnabled(True)
-            self.prog_clone.setValue(100)
-            self.lbl_clone_status.setText(f"🟢 Profilo vocale '{prof_name}' salvato con successo!")
-            QMessageBox.information(self, "Profilo Creato", f"Profilo vocale '{prof_name}' memorizzato con successo!")
-
-        def _on_err(err: str):
-            self.btn_save_clone.setEnabled(True)
-            self.prog_clone.setValue(0)
-            self.lbl_clone_status.setText("❌ Errore durante l'elaborazione.")
-            show_copyable_error(self, "Errore Creazione Profilo", err, is_warning=True)
-
-        self.clone_worker.progress_step.connect(_on_step)
-        self.clone_worker.finished_clone.connect(_on_done)
-        self.clone_worker.error_occurred.connect(_on_err)
-        self.clone_worker.start()
-
-    def _audition_last_cloned_voice(self):
-        target_path = self.last_cloned_profile_path
-        if not target_path or not os.path.exists(target_path):
-            QMessageBox.warning(self, "Nessun Profilo", "Genera prima un profilo vocale clonato.")
-            return
-        self._start_audition(mode="cloned", profile_path=target_path, text="The box was thrown beside the parked truck.")
-
-    def _audition_voice_design(self):
-        desc = self.txt_voice_desc.toPlainText().strip()
-        if not desc:
-            QMessageBox.warning(self, "Descrizione Mancante", "Descrivi la voce desiderata prima della demo.")
-            return
-        self._start_audition(mode="design", voice_desc=desc)
-
     def _run_benchmark_test(self, phrase: str, test_name: str):
         self.lbl_active_phrase.setText(f'Test [{test_name}]: "{phrase}"')
         self._start_audition(text=phrase)
@@ -833,8 +701,6 @@ class VoiceSettingsDrawer(QDialog):
         self.btn_test_context.setEnabled(False)
         self.btn_test_emotion.setEnabled(False)
         self.btn_test_format.setEnabled(False)
-        if hasattr(self, "btn_test_clone"):
-            self.btn_test_clone.setEnabled(False)
 
         self.btn_stop.setEnabled(True)
         self.prog_audio.setValue(0)
@@ -894,8 +760,6 @@ class VoiceSettingsDrawer(QDialog):
         self.btn_test_context.setEnabled(True)
         self.btn_test_emotion.setEnabled(True)
         self.btn_test_format.setEnabled(True)
-        if hasattr(self, "btn_test_clone"):
-            self.btn_test_clone.setEnabled(True)
 
         self.btn_stop.setEnabled(False)
         self.prog_audio.setValue(0)

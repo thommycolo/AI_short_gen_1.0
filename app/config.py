@@ -136,7 +136,7 @@ CATEGORIES = [
     "Subway Surfers",
     "Satisfying",
     "GTA V",
-    "Drone/Nature",
+    "Drone",
     "General"
 ]
 

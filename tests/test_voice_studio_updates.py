@@ -24,7 +24,7 @@ class TestVoiceStudioUpdates(unittest.TestCase):
     def test_voice_studio_tab_titles(self):
         drawer = VoiceSettingsDrawer()
         tab_count = drawer.tabs.count()
-        self.assertEqual(tab_count, 4)
+        self.assertEqual(tab_count, 2)
 
         # Check tab 0 title is VOCI STANDARD (without 'tab 1')
         tab0_title = drawer.tabs.tabText(0)
@@ -36,6 +36,11 @@ class TestVoiceStudioUpdates(unittest.TestCase):
         for i in range(tab_count):
             title = drawer.tabs.tabText(i).upper()
             self.assertFalse(any(f"TAB {n}" in title for n in range(1, 10)), f"Tab {i} has 'TAB n': {title}")
+
+        # Check that voice clone and design tabs have been removed
+        tab_titles = [drawer.tabs.tabText(i).upper() for i in range(tab_count)]
+        self.assertNotIn("VOICE CLONE", tab_titles)
+        self.assertNotIn("VOICE DESIGN", tab_titles)
 
     def test_tab_voci_standard_no_lingua_primaria(self):
         drawer = VoiceSettingsDrawer()
@@ -57,14 +62,16 @@ class TestVoiceStudioUpdates(unittest.TestCase):
         self.assertIn("Wait—don't tell me... they actually lost the game?!", drawer.btn_test_emotion.toolTip())
         self.assertIn("The update is live at example.com.", drawer.btn_test_format.toolTip())
 
-    def test_voice_clone_progress_bar_and_elements(self):
+    def test_voice_clone_and_design_tabs_removed(self):
         drawer = VoiceSettingsDrawer()
 
-        # Must have progress bar and status for cloning
-        self.assertTrue(hasattr(drawer, "prog_clone"))
-        self.assertTrue(hasattr(drawer, "lbl_clone_status"))
-        self.assertTrue(hasattr(drawer, "btn_test_clone"))
-        self.assertTrue(hasattr(drawer, "base_weights_card"))
+        # Voice clone and design elements must NOT exist in the drawer
+        tab_titles = [drawer.tabs.tabText(i).upper() for i in range(drawer.tabs.count())]
+        self.assertNotIn("VOICE CLONE", tab_titles)
+        self.assertNotIn("VOICE DESIGN", tab_titles)
+        self.assertFalse(hasattr(drawer, "prog_clone"))
+        self.assertFalse(hasattr(drawer, "lbl_clone_status"))
+        self.assertFalse(hasattr(drawer, "btn_test_clone"))
 
     def test_main_window_voice_selector_and_demo_phrase(self):
         card = VoiceSelectorCard()

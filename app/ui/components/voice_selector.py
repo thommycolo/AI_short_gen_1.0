@@ -35,11 +35,11 @@ class VoiceSelectorCard(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
-        header_lbl = QLabel("2. GENERATORE VOCALE (Gemini TTS)")
+        header_lbl = QLabel("2. GENERATORE VOCALE")
         header_lbl.setObjectName("SectionHeader")
         layout.addWidget(header_lbl)
 
-        # Riga controlli speaker e lingua
+        # Riga controlli speaker
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("Speaker:"))
         self.combo_speaker = QComboBox()
@@ -47,11 +47,6 @@ class VoiceSelectorCard(QFrame):
             self.combo_speaker.addItem(v["display"], v["name"])
         self.combo_speaker.currentIndexChanged.connect(self._on_change)
         row1.addWidget(self.combo_speaker, stretch=1)
-
-        row1.addWidget(QLabel("Lingua:"))
-        self.combo_lang = QComboBox()
-        self.combo_lang.addItems(["🇺🇸 English (US)", "🌐 Multilingual"])
-        row1.addWidget(self.combo_lang)
         layout.addLayout(row1)
 
         # Riga Stile e Azioni

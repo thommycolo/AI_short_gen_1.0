@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QComboBox, QTextEdit, QFileDialog, QMessageBox, QProgressBar,
-    QApplication, QInputDialog
+    QApplication, QInputDialog, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -207,6 +207,7 @@ class MainWindow(QMainWindow):
             "animation_style": "WORD_POP"
         }
         self.active_video_category: str = "Minecraft"
+        self.preferred_video_source_id: Optional[int] = None
         self.active_bgm_config: Dict[str, Any] = {
             "bgm_track_id": None,
             "ducking_active": True,
@@ -246,8 +247,20 @@ class MainWindow(QMainWindow):
         content_split.setSpacing(14)
 
         # COLONNA SINISTRA: WORKSPACE DI CONFIGURAZIONE (58%)
-        left_column = self._create_left_column()
-        content_split.addLayout(left_column, stretch=58)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        left_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; } QScrollArea > QWidget > QWidget { background: transparent; }")
+
+        left_container = QWidget()
+        left_container.setObjectName("LeftColumnContainer")
+        left_container.setStyleSheet("background: transparent;")
+        left_layout = self._create_left_column()
+        left_container.setLayout(left_layout)
+        left_scroll.setWidget(left_container)
+
+        content_split.addWidget(left_scroll, stretch=58)
 
         # COLONNA DESTRA: MONITOR 9:16 & BATCH (42%)
         right_column = self._create_right_column()
@@ -301,6 +314,7 @@ class MainWindow(QMainWindow):
 
     def _create_left_column(self) -> QVBoxLayout:
         left_layout = QVBoxLayout()
+        left_layout.setContentsMargins(0, 0, 4, 0)
         left_layout.setSpacing(10)
 
         # Modulo 1: SCRIPT ATTIVO & REPOSITORY
@@ -320,7 +334,7 @@ class MainWindow(QMainWindow):
 
         # Modulo 3: BACKGROUND VIDEO POOL
         self.card_video = VideoSourceCard()
-        self.card_video.import_local_requested.connect(self._import_local_video)
+        self.card_video.set_categories(self.video_pool.get_available_categories(), current=self.active_video_category)
         self.card_video.download_yt_requested.connect(self._open_video_download_modal)
         self.card_video.pool_library_requested.connect(self._open_video_pool_modal)
         self.card_video.settings_drawer_requested.connect(self._open_video_settings_drawer)
@@ -447,6 +461,9 @@ class MainWindow(QMainWindow):
         # Ripristino della sessione precedente o avvio con workspace pulito
         self._restore_session_or_start_fresh()
 
+        # Popola tutte le categorie disponibili (comprese cartelle su disco e custom)
+        self.card_video.set_categories(self.video_pool.get_available_categories(), current=self.active_video_category)
+
         # Aggiorna lo stato del pool per la categoria corrente
         self._update_pool_status_display()
 
@@ -464,6 +481,7 @@ class MainWindow(QMainWindow):
                 "active_voice_config": self.active_voice_config,
                 "active_subtitle_config": self.active_subtitle_config,
                 "active_video_category": self.active_video_category,
+                "preferred_video_source_id": self.preferred_video_source_id,
                 "active_bgm_config": self.active_bgm_config,
                 "global_preset_text": self.cmb_global_preset.currentText() if hasattr(self, "cmb_global_preset") else None
             }
@@ -541,6 +559,10 @@ class MainWindow(QMainWindow):
                 self.active_video_category = cat
                 self.card_video.combo_category.setCurrentText(cat)
 
+            pref_id = session.get("preferred_video_source_id")
+            if pref_id:
+                self.preferred_video_source_id = pref_id
+
             sub_cfg = session.get("active_subtitle_config")
             if sub_cfg and isinstance(sub_cfg, dict):
                 self.active_subtitle_config.update(sub_cfg)
@@ -590,17 +612,67 @@ class MainWindow(QMainWindow):
         self.log_event("Script attivo rimosso.")
         self._save_session_state()
 
+    def _get_estimated_story_video_sec(self) -> float:
+        if not self.active_script_data:
+            return 0.0
+        text = self.active_script_data.get("raw_text") or self.active_script_data.get("full_text", "")
+        speed = float(self.active_voice_config.get("speed", 1.0))
+        word_count = len(text.split())
+        timing_wps = float(self.active_timing_config.get("wps", DEFAULT_WPS))
+        total_p = float(self.active_timing_config.get("padding_intro_sec", PADDING_INTRO_SEC)) + float(self.active_timing_config.get("padding_outro_sec", PADDING_OUTRO_SEC))
+        est_audio = word_count / (timing_wps * speed) if (timing_wps * speed) > 0 else 0.0
+        return est_audio + total_p
+
     def _update_pool_status_display(self):
-        pool_stats = self.video_pool.get_pool_status_for_category(self.active_video_category)
+        req_sec = self._get_estimated_story_video_sec()
+        min_thresh = req_sec if req_sec > 0 else 38.0
+
+        # 1. Se l'utente ha impostato una preferenza manuale nel pool per questa categoria:
+        if self.preferred_video_source_id:
+            pref = self.video_pool.get_source_by_id(self.preferred_video_source_id)
+            if pref and pref.get("category") == self.active_video_category and pref.get("status") in ("DISPONIBILE", "PARZIALMENTE_USATO"):
+                title = pref.get("video_title") or "Video Master"
+                avail_sec = float(pref.get("available_duration_sec", 0.0))
+                front_sec = float(pref.get("frontier_playhead_sec", 0.0))
+                mins = int(avail_sec // 60)
+                secs = int(avail_sec % 60)
+                front_m = int(front_sec // 60)
+                front_s = int(front_sec % 60)
+                dur_str = f"Durata: {mins:02d}m {secs:02d}s disponibili (Frontiera: {front_m:02d}:{front_s:02d})"
+                self.card_video.update_video_info(
+                    title=title,
+                    duration_str=dur_str,
+                    is_valid=(avail_sec >= min_thresh),
+                    has_video=True
+                )
+                return
+
+        # 2. Altrimenti seleziona automaticamente il video idoneo secondo i criteri di auto-assegnazione:
+        pool_stats = self.video_pool.get_pool_status_for_category(self.active_video_category, required_duration_sec=req_sec)
+        source_count = pool_stats.get("source_count", 0)
         tot_sec = pool_stats.get("total_available_sec", 0.0)
-        mins = int(tot_sec // 60)
-        secs = int(tot_sec % 60)
-        title = pool_stats.get("best_video_title", "Nessun video idoneo")
-        self.card_video.update_video_info(
-            title=title,
-            duration_str=f"{mins:02d}m {secs:02d}s disponibili",
-            is_valid=(tot_sec >= 38.0)
-        )
+        if source_count > 0:
+            best_title = pool_stats.get("best_video_title") or "Video Master"
+            best_id = pool_stats.get("best_video_id")
+            self.preferred_video_source_id = best_id
+            frontier_sec = pool_stats.get("best_frontier_sec", 0.0)
+            avail_sec = pool_stats.get("best_available_sec", tot_sec)
+
+            mins = int(avail_sec // 60)
+            secs = int(avail_sec % 60)
+            front_m = int(frontier_sec // 60)
+            front_s = int(frontier_sec % 60)
+
+            dur_str = f"Durata: {mins:02d}m {secs:02d}s disponibili (Frontiera: {front_m:02d}:{front_s:02d})"
+            self.card_video.update_video_info(
+                title=best_title,
+                duration_str=dur_str,
+                is_valid=(avail_sec >= min_thresh),
+                has_video=True
+            )
+        else:
+            self.preferred_video_source_id = None
+            self.card_video.show_no_video_warning(category=self.active_video_category)
 
     # --- MODALI & DRAWERS ---
 
@@ -716,13 +788,64 @@ class MainWindow(QMainWindow):
     def _open_video_download_modal(self):
         modal = VideoDownloadModal(self.video_pool, default_category=self.active_video_category, parent=self)
         if modal.exec():
+            self.card_video.set_categories(self.video_pool.get_available_categories(), current=self.active_video_category)
             self._update_pool_status_display()
             self.log_event("Nuovo video master scaricato nel pool.")
 
     def _open_video_pool_modal(self):
-        modal = VideoPoolModal(self.video_pool, parent=self)
+        req_sec = self._get_estimated_story_video_sec() or 38.0
+        modal = VideoPoolModal(
+            self.video_pool,
+            active_category=self.active_video_category,
+            required_duration_sec=req_sec,
+            selected_source_id=self.preferred_video_source_id,
+            parent=self
+        )
+
+        def _on_source_chosen(sid: int):
+            if modal.selected_video_data:
+                self._apply_pool_video_selection(modal.selected_video_data)
+
+        modal.source_selected.connect(_on_source_chosen)
         modal.exec()
-        self._update_pool_status_display()
+
+        if modal.selected_video_data:
+            self._apply_pool_video_selection(modal.selected_video_data)
+        else:
+            self.card_video.set_categories(self.video_pool.get_available_categories(), current=self.active_video_category)
+            self._update_pool_status_display()
+
+    def _apply_pool_video_selection(self, src: Dict[str, Any]):
+        """Applica la selezione di un video dal pool, aggiornando la categoria della Home Page se diversa."""
+        new_cat = src.get("category", self.active_video_category)
+        old_cat = self.active_video_category
+        self.active_video_category = new_cat
+        self.preferred_video_source_id = src.get("id")
+
+        all_cats = self.video_pool.get_available_categories()
+        self.card_video.set_categories(all_cats, current=new_cat)
+
+        title = src.get("video_title") or "Video Master"
+        avail_sec = float(src.get("available_duration_sec", 0.0))
+        front_sec = float(src.get("frontier_playhead_sec", 0.0))
+        avail_m = int(avail_sec // 60)
+        avail_s = int(avail_sec % 60)
+        front_m = int(front_sec // 60)
+        front_s = int(front_sec % 60)
+        dur_str = f"Durata: {avail_m:02d}m {avail_s:02d}s disponibili (Frontiera: {front_m:02d}:{front_s:02d})"
+
+        self.card_video.update_video_info(
+            title=title,
+            duration_str=dur_str,
+            is_valid=(avail_sec >= 38.0),
+            has_video=True
+        )
+        self._save_session_state()
+
+        if old_cat != new_cat:
+            self.log_event(f"Categoria modificata da '{old_cat}' a '{new_cat}' (Video selezionato: \"{title}\")")
+        else:
+            self.log_event(f"Video selezionato dal pool: \"{title}\" (Categoria: {new_cat})")
 
     def _open_batch_queue_modal(self):
         modal = BatchQueueModal(self.script_repo, self.video_pool, parent=self)
@@ -818,20 +941,6 @@ class MainWindow(QMainWindow):
         self._save_session_state()
         self.log_event(f"Tipografia sottotitoli aggiornata: {settings.get('font_name', '')} {settings.get('font_size', '')}pt")
 
-    def _import_local_video(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Importa Video Master Locale", "", "Video Files (*.mp4 *.mkv *.mov *.avi)")
-        if path:
-            self.lbl_ingest_status.setText("⬇️ Zero-Recode Ingestion in corso...")
-            QApplication.processEvents()
-            try:
-                info = self.video_pool.ingest_master_video(path, category=self.active_video_category)
-                self.log_event(f"Master importato: \"{info.title}\" ({info.duration_sec:.1f}s) in {self.active_video_category}")
-                self._update_pool_status_display()
-                self.lbl_ingest_status.setText("⬇️ Zero-Recode Ingestion: Pronto (<3s)")
-            except Exception as e:
-                show_copyable_error(self, "Errore Ingestion", f"Impossibile importare il video:\n{e}")
-                self.lbl_ingest_status.setText("⬇️ Zero-Recode Ingestion: Errore")
-
     def _on_voice_changed(self, voice_dict: dict):
         self.active_voice_config.update(voice_dict)
         self._save_session_state()
@@ -839,9 +948,15 @@ class MainWindow(QMainWindow):
 
     def _on_video_category_changed(self, category: str):
         self.active_video_category = category
+        self.preferred_video_source_id = None
         self._update_pool_status_display()
         self._save_session_state()
-        self.log_event(f"Categoria video attiva: {category}")
+        pool_stats = self.video_pool.get_pool_status_for_category(category)
+        if pool_stats.get("source_count", 0) > 0:
+            v_title = pool_stats.get("best_video_title", "")
+            self.log_event(f"Categoria video attiva: {category} (Selezionato: \"{v_title}\")")
+        else:
+            self.log_event(f"Categoria video attiva: {category} (⚠️ Nessun video disponibile nel pool)")
 
     def _on_subtitle_style_changed(self, style_dict: dict):
         self.active_subtitle_config.update(style_dict)
@@ -935,24 +1050,32 @@ class MainWindow(QMainWindow):
             )
             if diag.exec():
                 if diag.chosen_action == CategoryContinuityWarningDialog.ACTION_CHANGE_CATEGORY:
-                    curr_idx = CATEGORIES.index(self.active_video_category) if self.active_video_category in CATEGORIES else 0
+                    all_cats = self.video_pool.get_available_categories()
+                    curr_idx = all_cats.index(self.active_video_category) if self.active_video_category in all_cats else 0
                     cat, ok = QInputDialog.getItem(
-                        self, "Cambia Categoria Storia", "Seleziona una nuova categoria tematica:",
-                        CATEGORIES, current=curr_idx, editable=False
+                        self, "Cambia Categoria Storia", "Seleziona una categoria tematica:",
+                        all_cats, current=curr_idx, editable=False
                     )
                     if ok and cat:
                         self.active_video_category = cat
-                        self.card_video.combo_category.setCurrentText(cat)
+                        self.card_video.set_categories(all_cats, current=cat)
                         self._update_pool_status_display()
                         self.log_event(f"Categoria storia modificata a: {cat}")
-                elif diag.chosen_action == CategoryContinuityWarningDialog.ACTION_IMPORT_LOCAL:
-                    self._import_local_video()
                 elif diag.chosen_action == CategoryContinuityWarningDialog.ACTION_DOWNLOAD_YT:
                     self._open_video_download_modal()
             return
 
-        best_master = pool_status.get("best_master_path", "")
-        best_title = pool_status.get("best_video_title", "Continuous_Master.mp4")
+        if self.preferred_video_source_id:
+            pref = self.video_pool.get_source_by_id(self.preferred_video_source_id)
+            if pref and pref.get("category") == self.active_video_category and pref.get("status") in ("DISPONIBILE", "PARZIALMENTE_USATO"):
+                best_master = pref.get("file_path", "")
+                best_title = pref.get("video_title", "Continuous_Master.mp4")
+            else:
+                best_master = pool_status.get("best_master_path", "")
+                best_title = pool_status.get("best_video_title", "Continuous_Master.mp4")
+        else:
+            best_master = pool_status.get("best_master_path", "")
+            best_title = pool_status.get("best_video_title", "Continuous_Master.mp4")
 
         # 2. Genera frame di verifica a 0.600s
         comp_frame = self.review_engine.generate_review_composite_frame(
@@ -1011,7 +1134,8 @@ class MainWindow(QMainWindow):
             subtitle_config=dict(self.active_subtitle_config),
             bgm_config=dict(self.active_bgm_config),
             speed_rate=speed,
-            timing_config=dict(self.active_timing_config)
+            timing_config=dict(self.active_timing_config),
+            source_id=self.preferred_video_source_id
         )
         self._pending_jobs = [job]
         self._active_job_title = title

@@ -7,7 +7,7 @@ from typing import Optional, List
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QComboBox,
     QPushButton, QFrame, QFileDialog, QListWidget, QListWidgetItem,
-    QProgressBar, QMessageBox, QWidget
+    QProgressBar, QMessageBox, QWidget, QInputDialog
 )
 from PySide6.QtCore import Qt, Signal, QObject
 from app.config import CATEGORIES
@@ -120,22 +120,22 @@ class VideoDownloadModal(QDialog):
 
         # Categoria & Azioni di Aggiunta
         act_row = QHBoxLayout()
-        act_row.addWidget(QLabel("Categoria:"))
+        act_row.addWidget(QLabel("Categoria (Cartella Archivio):"))
         self.combo_cat = QComboBox()
-        self.combo_cat.addItem("🤖 Auto-Rileva Categoria")
-        self.combo_cat.addItems(CATEGORIES)
-        if self.default_category and self.default_category in CATEGORIES:
+        available_cats = self.video_mgr.get_available_categories()
+        self.combo_cat.addItems(available_cats)
+        if self.default_category and self.default_category in available_cats:
             self.combo_cat.setCurrentText(self.default_category)
         act_row.addWidget(self.combo_cat, stretch=1)
 
-        self.btn_add_urls = QPushButton("+ Scarica da YouTube")
+        self.btn_add_category = QPushButton("➕ Nuova Categoria")
+        self.btn_add_category.clicked.connect(self._add_new_category)
+        act_row.addWidget(self.btn_add_category)
+
+        self.btn_add_urls = QPushButton("⬇️ Scarica da YouTube")
         self.btn_add_urls.setObjectName("PrimaryButton")
         self.btn_add_urls.clicked.connect(self._start_download_urls)
         act_row.addWidget(self.btn_add_urls)
-
-        self.btn_local_file = QPushButton("📁 Importa File Locale")
-        self.btn_local_file.clicked.connect(self._import_local_files)
-        act_row.addWidget(self.btn_local_file)
         layout.addLayout(act_row)
 
         self.txt_urls.setFocus()
@@ -230,27 +230,26 @@ class VideoDownloadModal(QDialog):
             self.combo_browser.setCurrentText("cookies.txt")
             QMessageBox.information(self, "Cookie Impostati", f"File cookie selezionato: {f}")
 
-    def _import_local_files(self):
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "Seleziona Video Locali", "", "Video Files (*.mp4 *.mkv *.mov *.webm);;All Files (*)"
+    def _add_new_category(self):
+        new_cat, ok = QInputDialog.getText(
+            self,
+            "Nuova Categoria Video",
+            "Inserisci il nome della nuova categoria (verrà creata una cartella dedicata su disco):"
         )
-        if not files:
-            return
-
-        cat_choice = self.combo_cat.currentText()
-        cat_override = None if "Auto" in cat_choice else cat_choice
-
-        for f_path in files:
-            try:
-                src_id = self.video_mgr.import_local_video(f_path, category_override=cat_override)
-                p = Path(f_path)
-                item = QListWidgetItem(f"🟢 Ingestion Completata (< 3s): {p.stem} (ID: #{src_id})")
-                self.has_imported = True
-                self.list_queue.addItem(item)
-                self.video_imported.emit(src_id)
-            except Exception as e:
-                item = QListWidgetItem(f"❌ Errore Import {Path(f_path).name}: {e}")
-                self.list_queue.addItem(item)
+        if ok and new_cat and new_cat.strip():
+            cat_name = new_cat.strip()
+            self.video_mgr.ensure_category_dir(cat_name)
+            idx = self.combo_cat.findText(cat_name)
+            if idx == -1:
+                self.combo_cat.addItem(cat_name)
+                self.combo_cat.setCurrentText(cat_name)
+            else:
+                self.combo_cat.setCurrentIndex(idx)
+            QMessageBox.information(
+                self,
+                "Categoria Creata",
+                f"Categoria '{cat_name}' creata e cartella archivio inizializzata con successo."
+            )
 
     def _start_download_urls(self):
         urls = [u.strip() for u in self.txt_urls.toPlainText().splitlines() if u.strip()]
@@ -258,13 +257,17 @@ class VideoDownloadModal(QDialog):
             QMessageBox.warning(self, "Attenzione", "Incolla almeno un link YouTube valido.")
             return
 
+        cat_choice = self.combo_cat.currentText().strip()
+        if not cat_choice:
+            QMessageBox.warning(self, "Attenzione", "Seleziona o crea una categoria prima di procedere al download.")
+            return
+
         browser_choice = self.combo_browser.currentText().split(" ")[0]
-        cat_choice = self.combo_cat.currentText()
-        cat_override = None if "Auto" in cat_choice else cat_choice
+        cat_override = cat_choice
         cookies_file = getattr(self, "cookies_file_path", None)
 
         self.btn_add_urls.setEnabled(False)
-        self.btn_local_file.setEnabled(False)
+        self.btn_add_category.setEnabled(False)
 
         # Reset Monitor UI
         self.progress_bar.setValue(0)
@@ -355,7 +358,7 @@ class VideoDownloadModal(QDialog):
                         category_override=cat_override,
                         progress_callback=_on_yt_dlp_progress
                     )
-                    self.signals.item_completed.emit(u, f"Master Intatto (ID: #{src_id})")
+                    self.signals.item_completed.emit(u, "Master Intatto")
                 except Exception as e:
                     self.signals.item_failed.emit(u, str(e))
             self.signals.all_finished.emit()
@@ -413,7 +416,7 @@ class VideoDownloadModal(QDialog):
 
     def _on_all_finished(self):
         self.btn_add_urls.setEnabled(True)
-        self.btn_local_file.setEnabled(True)
+        self.btn_add_category.setEnabled(True)
         self.txt_urls.clear()
         QMessageBox.information(self, "Elaborazione Conclusa", "Download e catalogazione video completati nel Pool.")
 

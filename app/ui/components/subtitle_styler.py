@@ -67,14 +67,17 @@ class SubtitleStylerCard(QFrame):
         # Box informazioni tecniche
         info_box = QFrame()
         info_box.setObjectName("InnerCard")
+        info_box.setMinimumHeight(54)
         info_layout = QVBoxLayout(info_box)
-        info_layout.setContentsMargins(8, 6, 8, 6)
+        info_layout.setContentsMargins(10, 8, 10, 8)
         info_layout.setSpacing(4)
 
         b1 = QLabel("Auto-Wrap: [ Bounding Box <= 880px, 2 righe max ]")
         b1.setObjectName("HelperText")
+        b1.setMinimumHeight(16)
         b2 = QLabel("Timing: +0.5s pre / +1.5s outro (CTA a -1.0s)")
         b2.setObjectName("HelperText")
+        b2.setMinimumHeight(16)
         info_layout.addWidget(b1)
         info_layout.addWidget(b2)
         layout.addWidget(info_box)

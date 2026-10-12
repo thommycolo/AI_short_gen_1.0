@@ -50,6 +50,7 @@ class ContinuousVideoPoolManager:
         self.clips_dir.mkdir(parents=True, exist_ok=True)
         self.scene_detector = SceneBoundaryDetector(db_path=self.db_path)
         self._init_db()
+        self._migrate_existing_files()
 
     def _init_db(self):
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -86,21 +87,55 @@ class ContinuousVideoPoolManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_video_sources_status ON video_sources(status, category, available_duration_sec);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_segments_source_status ON video_timeline_segments(source_id, status);")
 
-    @classmethod
-    def classify_category(cls, title_or_filename: str) -> str:
-        """Classifica automaticamente la categoria del video tramite parole chiave nel titolo."""
-        t = title_or_filename.lower()
-        if any(k in t for k in ["minecraft", "mc", "parkour", "bedwars", "hypixel"]):
-            return "Minecraft"
-        if any(k in t for k in ["subway", "surfer", "surfers"]):
-            return "Subway Surfers"
-        if any(k in t for k in ["gta", "grand theft auto", "fivem", "los santos", "franklin", "trevor"]):
-            return "GTA V"
-        if any(k in t for k in ["satisfying", "soap", "kinetic", "slime", "hydraulic", "oddly", "crush", "press"]):
-            return "Satisfying"
-        if any(k in t for k in ["nature", "drone", "mountain", "ocean", "aerial", "forest", "landscape", "waterfall"]):
-            return "Drone/Nature"
-        return "General"
+    def ensure_category_dir(self, category: str) -> Path:
+        """Restituisce il path della cartella della categoria nel pool, creandola se necessario."""
+        clean_name = re.sub(r'[\\/*?:"<>|]', '_', category.strip()) if category else "General"
+        if not clean_name:
+            clean_name = "General"
+        cat_dir = self.clips_dir / clean_name
+        cat_dir.mkdir(parents=True, exist_ok=True)
+        return cat_dir
+
+    def get_available_categories(self) -> List[str]:
+        """Raccoglie tutte le categorie disponibili (config + cartelle su disco + database)."""
+        categories: List[str] = list(CATEGORIES)
+        # Rileva cartelle nel pool
+        if self.clips_dir.exists():
+            for d in self.clips_dir.iterdir():
+                if d.is_dir() and not d.name.startswith((".", "_")):
+                    if d.name not in categories:
+                        categories.append(d.name)
+        # Rileva categorie dal database
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("PRAGMA busy_timeout = 30000;")
+                rows = conn.execute("SELECT DISTINCT category FROM video_sources WHERE category IS NOT NULL AND category != ''").fetchall()
+                for r in rows:
+                    cat = r[0].strip()
+                    if cat and cat not in categories:
+                        categories.append(cat)
+        except Exception:
+            pass
+        return categories
+
+    def _migrate_existing_files(self):
+        """Sposta eventuali file video rimasti nella cartella root del pool dentro la rispettiva sottocartella di categoria."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA busy_timeout = 30000;")
+                rows = conn.execute("SELECT id, category, file_path FROM video_sources").fetchall()
+                for r in rows:
+                    fpath = Path(r["file_path"])
+                    cat = r["category"] or "General"
+                    cat_dir = self.ensure_category_dir(cat)
+                    if fpath.exists() and fpath.parent.resolve() == self.clips_dir.resolve():
+                        target_path = cat_dir / fpath.name
+                        if not target_path.exists():
+                            fpath.rename(target_path)
+                        conn.execute("UPDATE video_sources SET file_path = ? WHERE id = ?", (str(target_path.resolve()), r["id"]))
+        except Exception as e:
+            log.warning(f"Migrazione file video per categoria saltata: {e}")
 
     @staticmethod
     def _get_media_duration(file_path: str) -> float:
@@ -121,7 +156,7 @@ class ContinuousVideoPoolManager:
             raise ValueError(f"Il video dura meno di {MIN_REEL_VIDEO_SEC}s e non può ospitare uno Short.")
 
         video_title = path.stem
-        category = category_override or self.classify_category(video_title)
+        category = category_override.strip() if category_override else "General"
 
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 30000;")
@@ -161,9 +196,56 @@ class ContinuousVideoPoolManager:
             id=source_id,
             title=p.stem,
             duration_sec=self._get_media_duration(local_file_path),
-            category=category or self.classify_category(p.stem),
+            category=category or "General",
             file_path=str(p.resolve())
         )
+
+    @staticmethod
+    def mute_video_file(file_path: str) -> bool:
+        """
+        Rimuove la traccia audio da un file video a ricodifica zero (-c:v copy -an)
+        per liberare spazio su disco subito dopo il download.
+        """
+        p = Path(file_path)
+        if not p.exists():
+            return False
+
+        ffmpeg_bin, _ = find_system_ffmpeg()
+        if not ffmpeg_bin:
+            ffmpeg_bin = "ffmpeg"
+
+        temp_muted = p.with_name(f"{p.stem}_muted_temp{p.suffix}")
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-i", str(p),
+            "-c:v", "copy",
+            "-an",
+            str(temp_muted)
+        ]
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        try:
+            res = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120.0,
+                creationflags=creationflags
+            )
+            if res.returncode == 0 and temp_muted.exists() and temp_muted.stat().st_size > 0:
+                os.replace(str(temp_muted), str(p))
+                log.info(f"Video mutato con successo (traccia audio rimossa): {p.name}")
+                return True
+            else:
+                log.warning(f"Rimozione audio fallita per {p.name}: {res.stderr}")
+                if temp_muted.exists():
+                    temp_muted.unlink(missing_ok=True)
+                return False
+        except Exception as e:
+            log.warning(f"Errore durante il muting del video {p.name}: {e}")
+            if temp_muted.exists():
+                temp_muted.unlink(missing_ok=True)
+            return False
 
     def _resolve_browser_cookies(self, preferred_browser: Optional[str] = "firefox", cookies_file: Optional[str] = None) -> List[str]:
         """Fallback progressivo per i cookie YouTube: cookies.txt -> Firefox -> Chrome -> Edge -> Brave."""
@@ -198,8 +280,11 @@ class ContinuousVideoPoolManager:
         # Assicura presenza del runtime JS Deno in BIN_DIR per risolvere i challenge anti-bot di YouTube
         ensure_deno_binary()
 
-        # Nome file pulito e sicuro su Windows (evita caratteri come ':', '?', ecc. nel titolo)
-        out_template = str(self.clips_dir / f"yt_master_{temp_id}.%(ext)s")
+        category = category_override.strip() if category_override else "General"
+        cat_dir = self.ensure_category_dir(category)
+
+        # Nome file pulito e sicuro su Windows (salvato nella cartella della categoria)
+        out_template = str(cat_dir / f"yt_master_{temp_id}.%(ext)s")
         video_title = "YouTube_Master_Video"
         downloaded_file = None
 
@@ -276,7 +361,7 @@ class ContinuousVideoPoolManager:
             elif preferred_browser and preferred_browser != "cookies.txt":
                 cookie_args = ["--cookies-from-browser", preferred_browser]
 
-            out_path = str(self.clips_dir / f"yt_master_{temp_id}.mp4")
+            out_path = str(cat_dir / f"yt_master_{temp_id}.mp4")
             cmd = [
                 sys.executable, "-m", "yt_dlp",
                 "-f", "bv*[vcodec*=avc]+ba[acodec*=mp4a]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bestvideo+bestaudio/best",
@@ -318,14 +403,22 @@ class ContinuousVideoPoolManager:
 
         # Localizza file scaricato su disco
         if not downloaded_file or not os.path.exists(downloaded_file):
-            matched = list(self.clips_dir.glob(f"*{temp_id}*"))
+            matched = list(cat_dir.glob(f"*{temp_id}*"))
+            if not matched:
+                matched = list(self.clips_dir.glob(f"*{temp_id}*"))
             if matched:
                 downloaded_file = str(matched[0].resolve())
             else:
                 raise FileNotFoundError(f"Download non riuscito: file video non trovato su disco per {youtube_url}")
 
         final_video_path = str(Path(downloaded_file).resolve())
-        category = category_override or self.classify_category(video_title)
+
+        if progress_callback:
+            progress_callback({
+                'status': 'postprocessing',
+                'msg': 'Rimozione traccia audio (ottimizzazione spazio disco)...'
+            })
+        self.mute_video_file(final_video_path)
 
         total_dur = self._get_media_duration(final_video_path)
         if total_dur < MIN_REEL_VIDEO_SEC:
@@ -471,7 +564,7 @@ class ContinuousVideoPoolManager:
             if available_only:
                 q += " AND status IN ('DISPONIBILE', 'PARZIALMENTE_USATO') AND available_duration_sec >= ?"
                 params.append(MIN_REEL_VIDEO_SEC)
-            if category and category != "General":
+            if category:
                 q += " AND category = ?"
                 params.append(category)
             q += " ORDER BY id DESC"
@@ -485,26 +578,90 @@ class ContinuousVideoPoolManager:
             rows = conn.execute("SELECT * FROM video_sources ORDER BY id DESC").fetchall()
             return [dict(r) for r in rows]
 
-    def delete_source(self, source_id: int):
+    def get_source_by_id(self, source_id: int) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout = 30000;")
+            row = conn.execute("SELECT * FROM video_sources WHERE id = ?", (source_id,)).fetchone()
+            return dict(row) if row else None
+
+    def delete_source(self, source_id: int, delete_file: bool = True) -> bool:
+        """Elimina il video dal database (incluse timeline e confini di scena) e opzionalmente dal disco."""
+        file_path = None
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 30000;")
+            row = conn.execute("SELECT file_path FROM video_sources WHERE id = ?", (source_id,)).fetchone()
+            if row:
+                file_path = row[0]
+            conn.execute("DELETE FROM video_timeline_segments WHERE source_id = ?", (source_id,))
+            conn.execute("DELETE FROM video_scene_boundaries WHERE source_id = ?", (source_id,))
             conn.execute("DELETE FROM video_sources WHERE id = ?", (source_id,))
 
-    def get_pool_status_for_category(self, category: str) -> Dict[str, Any]:
-        """Ritorna statistiche e miglior video disponibile per la categoria."""
-        sources = self.get_sources(category=category, available_only=True)
-        if not sources and category != "General":
-            sources = self.get_sources(category="General", available_only=True)
-            if not sources:
-                sources = self.get_sources(category=None, available_only=True)
+        if delete_file and file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                log.warning(f"Impossibile eliminare il file fisico del video #{source_id} ({file_path}): {e}")
+        return True
 
+    def find_optimal_source_for_category(
+        self,
+        category: str,
+        required_duration_sec: float = 0.0
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Seleziona in automatico il video ottimale della categoria secondo i criteri di auto-assegnazione:
+        1. Categoria: appartenenza esclusiva alla categoria indicata.
+        2. Stato e disponibilità: 'DISPONIBILE' o 'PARZIALMENTE_USATO'.
+        3. Fabbisogno: preferenza per candidati che coprono il fabbisogno richiesto (se specificato).
+        4. Continuità e Tightest-Fit: priorità a video già parzialmente riprodotti per continuità narrativa,
+           minimizzando gli scarti residui (PURGE_THRESHOLD_MAX = 110s).
+        """
+        sources = self.get_sources(category=category, available_only=True)
+        if not sources:
+            return None
+
+        # 1. Filtra candidati con durata sufficiente
+        eligible = [s for s in sources if s.get("available_duration_sec", 0.0) >= required_duration_sec] if required_duration_sec > 0 else sources
+        pool = eligible if eligible else sources
+
+        # 2. Criteri di continuità narrativa & tightest-fit (PURGE_THRESHOLD_MAX = 110.0s)
+        PURGE_THRESHOLD_MAX = 110.0
+        best_source = None
+        best_score = float("inf")
+
+        for s in pool:
+            avail = float(s.get("available_duration_sec", 0.0))
+            leftover = avail - required_duration_sec if required_duration_sec > 0 else avail
+            waste = leftover if (0 <= leftover <= PURGE_THRESHOLD_MAX) else (1000.0 + leftover)
+
+            # Bonus continuità: se già iniziato, continuiamo questo video prioritariamente
+            is_in_progress = (s.get("status") == "PARZIALMENTE_USATO" or float(s.get("frontier_playhead_sec", 0.0)) > 0)
+            score = waste - (5000.0 if is_in_progress else 0.0)
+
+            if score < best_score:
+                best_score = score
+                best_source = s
+
+        return best_source or (sources[0] if sources else None)
+
+    def get_pool_status_for_category(self, category: str, required_duration_sec: float = 0.0) -> Dict[str, Any]:
+        """Ritorna statistiche e miglior video disponibile per la specifica categoria (secondo criteri di auto-assegnazione)."""
+        sources = self.get_sources(category=category, available_only=True)
         total_avail = sum(s.get("available_duration_sec", 0.0) for s in sources)
-        best_title = sources[0]["video_title"] if sources else "Nessun video idoneo"
-        best_path = sources[0]["file_path"] if sources else ""
+        best = self.find_optimal_source_for_category(category, required_duration_sec=required_duration_sec) if sources else None
+        best_title = best["video_title"] if best else ""
+        best_path = best["file_path"] if best else ""
+        best_id = best["id"] if best else None
+        frontier_sec = best["frontier_playhead_sec"] if best else 0.0
+        avail_sec = best["available_duration_sec"] if best else 0.0
 
         return {
             "total_available_sec": total_avail,
             "best_video_title": best_title,
             "best_master_path": best_path,
+            "best_video_id": best_id,
+            "best_frontier_sec": frontier_sec,
+            "best_available_sec": avail_sec,
             "source_count": len(sources)
         }

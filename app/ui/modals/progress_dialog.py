@@ -235,7 +235,7 @@ class ProductionProgressDialog(QDialog):
                 lbl.setText(f"{name}\n⏳ IN ATTESA")
                 lbl.setStyleSheet("background-color: #1A1C22; color: #666E7F; border-radius: 4px; padding: 6px;")
 
-        phase_names = ["Sintesi Vocale Gemini TTS", "Allineamento Sottotitoli Whisper", "Mastering Audio & BGM", "Montaggio Hardware NVENC"]
+        phase_names = ["Sintesi Vocale", "Allineamento Sottotitoli Whisper", "Mastering Audio & BGM", "Montaggio Hardware NVENC"]
         p_name = phase_names[phase_idx] if 0 <= phase_idx < len(phase_names) else f"Fase {phase_idx+1}"
         self.lbl_console.setText(f"[{time.strftime('%H:%M:%S')}] {p_name} ({pct:.0f}%) in esecuzione...")
 
