@@ -43,6 +43,8 @@ def _tts_worker_proc(task_data: dict, result_queue: multiprocessing.Queue):
         speaker = task_data.get("speaker", "Ryan")
         instruct = task_data.get("instruct", "")
         speed = float(task_data.get("speed", 1.0))
+        pitch = float(task_data.get("pitch", 0.0) or 0.0)
+        temp = float(task_data.get("temperature", task_data.get("temp", 0.70)) or 0.70)
         outro_text = task_data.get("outro_text", "")
         outro_wav = task_data.get("outro_wav", "")
 
@@ -52,7 +54,9 @@ def _tts_worker_proc(task_data: dict, result_queue: multiprocessing.Queue):
             output_path=out_wav,
             speaker=speaker,
             instruct=instruct,
-            speed=speed
+            speed=speed,
+            pitch=pitch,
+            temperature=temp
         )
 
         measured_outro_dur = 0.0
@@ -62,7 +66,9 @@ def _tts_worker_proc(task_data: dict, result_queue: multiprocessing.Queue):
                 output_path=outro_wav,
                 speaker=speaker,
                 instruct=instruct,
-                speed=speed
+                speed=speed,
+                pitch=pitch,
+                temperature=temp
             )
 
         result_queue.put({
@@ -194,6 +200,8 @@ class VRAMLifecycleOrchestrator:
             "speaker": voice_cfg.get("speaker", "Ryan"),
             "instruct": voice_cfg.get("instruct", ""),
             "speed": speed,
+            "pitch": float(voice_cfg.get("pitch", 0.0) or 0.0),
+            "temperature": float(voice_cfg.get("temperature", voice_cfg.get("temp", 0.70)) or 0.70),
             "outro_text": outro_text or "",
             "outro_wav": outro_wav or ""
         }

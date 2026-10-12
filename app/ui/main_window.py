@@ -99,7 +99,17 @@ class MainWindowAuditionWorker(QThread):
     audition_ready = Signal(str)
     audition_failed = Signal(str)
 
-    def __init__(self, voice_suite: Qwen3VoiceSuite, preset_mgr: PresetManager, text: str, speaker: str, instruct: str, speed: float):
+    def __init__(
+        self,
+        voice_suite: Qwen3VoiceSuite,
+        preset_mgr: PresetManager,
+        text: str,
+        speaker: str,
+        instruct: str,
+        speed: float,
+        pitch: float = 0.0,
+        temperature: float = 0.70
+    ):
         super().__init__()
         self.voice_suite = voice_suite
         self.preset_mgr = preset_mgr
@@ -107,6 +117,8 @@ class MainWindowAuditionWorker(QThread):
         self.speaker = speaker
         self.instruct = instruct
         self.speed = speed
+        self.pitch = pitch
+        self.temperature = temperature
 
     def run(self):
         try:
@@ -120,6 +132,8 @@ class MainWindowAuditionWorker(QThread):
                 speaker=self.speaker,
                 instruct=self.instruct,
                 speed=self.speed,
+                pitch=self.pitch,
+                temperature=self.temperature,
                 is_preview=True
             )
             if os.path.exists(raw_path) and os.path.getsize(raw_path) > 200:
@@ -167,7 +181,10 @@ class MainWindow(QMainWindow):
         self.active_voice_config: Dict[str, Any] = {
             "speaker": "Ryan",
             "instruct": "Viral Hook (High Energy)",
-            "speed": 1.00
+            "speed": 1.00,
+            "pitch": 0.0,
+            "temperature": 0.70,
+            "temp": 0.70
         }
         self.active_subtitle_config: Dict[str, Any] = {
             "font_name": "Montserrat Black",
@@ -472,6 +489,25 @@ class MainWindow(QMainWindow):
             if rendered_complete or not has_active_project:
                 self._clear_active_script()
                 self._rendered_complete = False
+
+                voice_cfg = session.get("active_voice_config")
+                if voice_cfg and isinstance(voice_cfg, dict):
+                    self.active_voice_config.update(voice_cfg)
+                    self.card_voice.set_config(self.active_voice_config)
+
+                cat = session.get("active_video_category")
+                if cat and cat in CATEGORIES:
+                    self.active_video_category = cat
+                    self.card_video.combo_category.setCurrentText(cat)
+
+                sub_cfg = session.get("active_subtitle_config")
+                if sub_cfg and isinstance(sub_cfg, dict):
+                    self.active_subtitle_config.update(sub_cfg)
+
+                bgm_cfg = session.get("active_bgm_config")
+                if bgm_cfg and isinstance(bgm_cfg, dict):
+                    self.active_bgm_config.update(bgm_cfg)
+
                 self._save_session_state()
                 self.log_event("Workspace avviato pulito: nessun progetto in sospeso dopo l'ultimo render.")
                 return
@@ -688,6 +724,7 @@ class MainWindow(QMainWindow):
     def _open_voice_studio_drawer(self):
         title = self.active_script_data.get("context_title", "Active Script") if self.active_script_data else "Active Script"
         drawer = VoiceSettingsDrawer(
+            voice_suite=self.voice_suite,
             preset_mgr=self.preset_mgr,
             current_settings=self.active_voice_config,
             active_story_title=title,
@@ -808,34 +845,34 @@ class MainWindow(QMainWindow):
         self.log_event(f"Preset globale caricato: {txt}")
 
     def _audition_voice_preview(self):
-        text_sample = "Black holes are among the most mysterious entities in the universe."
-        if self.active_script_data:
-            text_sample = self.active_script_data.get("full_text") or self.active_script_data.get("raw_text") or text_sample
-            text_sample = text_sample.strip()[:90]
+        # Riproduce sempre la frase standard fissa per tutti i modelli o testi selezionati
+        text_sample = "The small pup gnawed a hole in the sock."
 
         cfg = self.card_voice.get_config()
         speaker = cfg.get("speaker", "Ryan")
         instruct = cfg.get("instruct", "Viral Hook (High Energy)")
         speed = float(self.active_voice_config.get("speed", 1.0))
+        pitch = float(self.active_voice_config.get("pitch", 0.0) or 0.0)
+        temp = float(self.active_voice_config.get("temperature", self.active_voice_config.get("temp", 0.70)) or 0.70)
 
         self.log_event(f"Provino vocale 5.0s ({speaker}): Sintesi e riproduzione in corso...")
         self.card_voice.btn_audition.setEnabled(False)
         self.card_voice.btn_audition.setText("⏳ Generazione...")
 
         self._audition_worker = MainWindowAuditionWorker(
-            self.voice_suite, self.preset_mgr, text_sample, speaker, instruct, speed
+            self.voice_suite, self.preset_mgr, text_sample, speaker, instruct, speed, pitch, temp
         )
 
         def _on_ready(path: str):
             self.log_event("Provino vocale 5.0s in riproduzione.")
             play_wav_file(path)
             self.card_voice.btn_audition.setEnabled(True)
-            self.card_voice.btn_audition.setText("▶ Ascolta Live ~97ms")
+            self.card_voice.btn_audition.setText("▶ Ascolta Demo")
 
         def _on_failed(err: str):
             self.log_event(f"Provino vocale fallito: {err}")
             self.card_voice.btn_audition.setEnabled(True)
-            self.card_voice.btn_audition.setText("▶ Ascolta Live ~97ms")
+            self.card_voice.btn_audition.setText("▶ Ascolta Demo")
 
         self._audition_worker.audition_ready.connect(_on_ready)
         self._audition_worker.audition_failed.connect(_on_failed)

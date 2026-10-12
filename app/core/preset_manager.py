@@ -57,23 +57,21 @@ class PresetManager:
         voice_json = Path("assets/presets/voice_presets.json")
         if voice_json.exists():
             with sqlite3.connect(self.db_path) as conn:
-                count = conn.execute("SELECT COUNT(*) FROM voice_presets").fetchone()[0]
-                if count == 0:
-                    try:
-                        data = json.loads(voice_json.read_text(encoding="utf-8"))
-                        for item in data:
-                            conn.execute("""
-                                INSERT OR IGNORE INTO voice_presets 
-                                (preset_name, language, speaker_or_profile, voice_type, instruct_prompt, speed_rate, pitch, temperature)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                item.get("preset_name"), item.get("language", "English"),
-                                item.get("speaker_or_profile", "Ryan"), item.get("voice_type", "CUSTOM"),
-                                item.get("instruct_prompt", ""), float(item.get("speed_rate", 1.0)),
-                                float(item.get("pitch", 0.0)), float(item.get("temperature", 0.7))
-                            ))
-                    except Exception:
-                        pass
+                try:
+                    data = json.loads(voice_json.read_text(encoding="utf-8"))
+                    for item in data:
+                        conn.execute("""
+                            INSERT OR IGNORE INTO voice_presets 
+                            (preset_name, language, speaker_or_profile, voice_type, instruct_prompt, speed_rate, pitch, temperature)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            item.get("preset_name"), item.get("language", "English"),
+                            item.get("speaker_or_profile", "Ryan"), item.get("voice_type", "CUSTOM"),
+                            item.get("instruct_prompt", ""), float(item.get("speed_rate", 1.0)),
+                            float(item.get("pitch", 0.0)), float(item.get("temperature", 0.7))
+                        ))
+                except Exception:
+                    pass
 
         sub_json = Path("assets/presets/subtitle_presets.json")
         if sub_json.exists():
@@ -100,6 +98,12 @@ class PresetManager:
                         pass
 
     def save_voice_preset(self, name: str, config: dict):
+        temp_val = config.get("temperature", config.get("temp", 0.70))
+        pitch_val = config.get("pitch", 0.0)
+        speed_val = config.get("speed", config.get("speed_rate", 1.0))
+        spk_val = config.get("speaker_or_profile", config.get("speaker", "Ryan"))
+        inst_val = config.get("instruct", config.get("instruct_prompt", ""))
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA busy_timeout = 30000;")
             conn.execute("""
@@ -107,10 +111,11 @@ class PresetManager:
                 (preset_name, language, speaker_or_profile, voice_type, instruct_prompt, speed_rate, pitch, temperature)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                name, config.get("language", "English"), config.get("speaker_or_profile", "Ryan"),
-                config.get("voice_type", "CUSTOM"), config.get("instruct", ""),
-                float(config.get("speed", 1.0)), float(config.get("pitch", 0.0)),
-                float(config.get("temp", 0.7))
+                name, config.get("language", "English"), spk_val,
+                config.get("voice_type", "CUSTOM"), inst_val,
+                float(speed_val if speed_val is not None else 1.0),
+                float(pitch_val if pitch_val is not None else 0.0),
+                float(temp_val if temp_val is not None else 0.70)
             ))
 
     def save_subtitle_preset(self, name: str, config: dict):

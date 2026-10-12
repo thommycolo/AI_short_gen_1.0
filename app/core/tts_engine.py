@@ -68,6 +68,27 @@ class Qwen3VoiceSuite:
     DEFAULT_NARRATOR_SPEAKER = DEFAULT_NARRATOR_SPEAKER
     DEFAULT_INSTRUCT = DEFAULT_INSTRUCT
 
+    # Stato modello globale condiviso per tutti i componenti (garantisce al 100% 1 solo modello in VRAM)
+    _shared_model = None
+    _shared_model_type: Optional[str] = None
+    _model_lock = threading.RLock()
+
+    @property
+    def _current_model(self):
+        return Qwen3VoiceSuite._shared_model
+
+    @_current_model.setter
+    def _current_model(self, val):
+        Qwen3VoiceSuite._shared_model = val
+
+    @property
+    def _current_model_type(self):
+        return Qwen3VoiceSuite._shared_model_type
+
+    @_current_model_type.setter
+    def _current_model_type(self, val):
+        Qwen3VoiceSuite._shared_model_type = val
+
     def __init__(self, db_path: str = SCRIPTS_DB_PATH, cache_dir: Path = VOICE_PROFILES_DIR):
         self.db_path = db_path
         self.cache_dir = Path(cache_dir)
@@ -87,8 +108,6 @@ class Qwen3VoiceSuite:
             except Exception:
                 pass
 
-        self._current_model = None
-        self._current_model_type: Optional[str] = None
         self._init_db()
 
     def _init_db(self):
@@ -110,14 +129,29 @@ class Qwen3VoiceSuite:
                 );
             """)
 
-    def _unload_active_model(self):
-        """Scaricamento esplicito del modello attivo e bonifica memoria video."""
-        if self._current_model is not None:
-            del self._current_model
-            self._current_model = None
-            self._current_model_type = None
+    @classmethod
+    def _unload_active_model(cls):
+        """Scaricamento esplicito del modello attivo e bonifica totale della memoria video."""
+        with cls._model_lock:
+            if cls._shared_model is not None:
+                if hasattr(cls._shared_model, "to"):
+                    try:
+                        cls._shared_model.to("cpu")
+                    except Exception:
+                        pass
+                try:
+                    del cls._shared_model
+                except Exception:
+                    pass
+                cls._shared_model = None
+                cls._shared_model_type = None
+            gc.collect()
             if torch and torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                try:
+                    torch.cuda.empty_cache()
+                    torch.cuda.ipc_collect()
+                except Exception:
+                    pass
             gc.collect()
 
     def _get_target_device_for_audition(self) -> str:
@@ -127,54 +161,101 @@ class Qwen3VoiceSuite:
 
     def _load_model(self, model_type: str, target_device: Optional[str] = None):
         device = target_device or self.device
-        if self._current_model is not None and self._current_model_type == model_type:
-            return self._current_model
+        with Qwen3VoiceSuite._model_lock:
+            if Qwen3VoiceSuite._shared_model is not None and Qwen3VoiceSuite._shared_model_type == model_type:
+                return Qwen3VoiceSuite._shared_model
 
-        self._unload_active_model()
+            # Scarica preventivamente qualsiasi modello attivo per azzerare la VRAM
+            Qwen3VoiceSuite._unload_active_model()
 
-        if Qwen3TTSModel is None:
-            log.info("Motore vocale neurale in modalità desktop nativa: sintesi vocale attiva.")
-            return None
+            if Qwen3TTSModel is None:
+                log.info("Motore vocale neurale in modalità desktop nativa: sintesi vocale attiva.")
+                return None
 
-        if not self._is_model_cached(model_type):
-            log.info(f"Pesi neurale Qwen3-TTS ({model_type}) non presenti nella cache locale. Utilizzo sintesi vocale di sistema ad alta fedeltà.")
-            return None
+            if not self._is_model_cached(model_type):
+                log.info(f"Pesi neurale Qwen3-TTS ({model_type}) non presenti nella cache locale.")
+                return None
 
-        model_ids = {
-            "custom": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-            "base": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
-            "design": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
-        }
-        local_dir_names = {
-            "custom": "Qwen3-TTS-CustomVoice",
-            "base": "Qwen3-TTS-Base",
-            "design": "Qwen3-TTS-VoiceDesign"
-        }
-        sub_dir = local_dir_names.get(model_type)
-        model_source = model_ids.get(model_type, model_ids["custom"])
-        if sub_dir:
-            local_path = MODELS_DIR / sub_dir
-            if (local_path / "model.safetensors").exists():
-                model_source = str(local_path)
+            model_ids = {
+                "custom": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+                "base": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+                "design": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+            }
+            local_dir_names = {
+                "custom": "Qwen3-TTS-CustomVoice",
+                "base": "Qwen3-TTS-Base",
+                "design": "Qwen3-TTS-VoiceDesign"
+            }
+            sub_dir = local_dir_names.get(model_type)
+            model_source = model_ids.get(model_type, model_ids["custom"])
+            if sub_dir:
+                local_path = MODELS_DIR / sub_dir
+                if (local_path / "model.safetensors").exists():
+                    model_source = str(local_path)
 
-        if "cuda" in str(device).lower() and torch is not None:
-            dtype = torch.bfloat16 if (hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported()) else torch.float16
-        else:
-            dtype = torch.float32 if torch is not None else None
+            if "cuda" in str(device).lower() and torch is not None:
+                dtype = torch.bfloat16 if (hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported()) else torch.float16
+            else:
+                dtype = torch.float32 if torch is not None else None
 
+            # Tentativo 1: Caricamento su device richiesto (es. CUDA)
+            try:
+                Qwen3VoiceSuite._shared_model = Qwen3TTSModel.from_pretrained(
+                    model_source,
+                    device_map=device,
+                    dtype=dtype,
+                    attn_implementation="sdpa",
+                    local_files_only=True
+                )
+                Qwen3VoiceSuite._shared_model_type = model_type
+                return Qwen3VoiceSuite._shared_model
+            except Exception as e:
+                is_oom = "out of memory" in str(e).lower() or "cuda" in str(e).lower()
+                if is_oom and "cuda" in str(device).lower():
+                    log.warning(f"Avviso memoria VRAM per {model_type}: {e}. Bonifica cache CUDA e fallback trasparente su CPU...")
+                    Qwen3VoiceSuite._unload_active_model()
+                    # Tentativo 2: Fallback trasparente su CPU senza crash
+                    try:
+                        Qwen3VoiceSuite._shared_model = Qwen3TTSModel.from_pretrained(
+                            model_source,
+                            device_map="cpu",
+                            dtype=torch.float32 if torch else None,
+                            attn_implementation="sdpa",
+                            local_files_only=True
+                        )
+                        Qwen3VoiceSuite._shared_model_type = model_type
+                        log.info(f"Modello {model_type} caricato con successo su CPU come fallback di resilienza.")
+                        return Qwen3VoiceSuite._shared_model
+                    except Exception as e_cpu:
+                        log.error(f"Fallback CPU non riuscito per {model_type}: {e_cpu}")
+                log.info(f"Impiego sintesi vocale di sistema per {model_type}: {e}")
+                return None
+
+    @staticmethod
+    def _apply_pitch_shift(wav_array: np.ndarray, sr: int, pitch: float) -> np.ndarray:
+        if abs(pitch) < 0.05:
+            return wav_array
         try:
-            self._current_model = Qwen3TTSModel.from_pretrained(
-                model_source,
-                device_map=device,
-                dtype=dtype,
-                attn_implementation="sdpa",
-                local_files_only=True
-            )
-            self._current_model_type = model_type
-            return self._current_model
+            import librosa
+            return librosa.effects.pitch_shift(wav_array.astype(np.float32), sr=sr, n_steps=float(pitch))
         except Exception as e:
-            log.info(f"Impiego sintesi vocale di sistema per {model_type}: {e}")
-            return None
+            log.warning(f"Pitch shift non applicato ({pitch}): {e}")
+            return wav_array
+
+    @staticmethod
+    def _apply_pitch_shift_to_file(wav_path: str, pitch: float):
+        if abs(pitch) < 0.05 or not os.path.exists(wav_path):
+            return
+        try:
+            import soundfile as sf
+            import librosa
+            data, fs = sf.read(wav_path)
+            if len(data.shape) > 1:
+                data = data[:, 0]
+            shifted = librosa.effects.pitch_shift(data.astype(np.float32), sr=fs, n_steps=float(pitch))
+            sf.write(wav_path, shifted, fs)
+        except Exception as e:
+            log.warning(f"Pitch shift file fallito: {e}")
 
     def _generate_synthetic_speech_fallback(
         self,
@@ -182,11 +263,13 @@ class Qwen3VoiceSuite:
         output_path: str,
         speaker: Optional[str] = None,
         instruct: Optional[str] = None,
-        speed: float = 1.0
+        speed: float = 1.0,
+        pitch: float = 0.0,
+        temperature: float = 0.70
     ) -> float:
         """
         Genera parlato audio reale tramite motore Microsoft Speech SAPI nativo di Windows
-        con selezione dinamica dello speaker (Ryan, Vivian, Aiden, Emma) e modulazione prosodica,
+        con selezione dinamica dello speaker (Ryan, Vivian, Aiden, Serena, Dylan, Eric, Ono_Anna, Sohee, Uncle_Fu) e modulazione prosodica,
         oppure sintesi armonica in caso di ambiente privo di TTS di sistema.
         """
         # Tentativo 1: Windows SAPI Speech Synthesis (voce naturale reale differenziata per speaker)
@@ -201,11 +284,14 @@ class Qwen3VoiceSuite:
 
                     rate = max(-10, min(10, int((speed - 1.0) * 5)))
                     speaker_str = str(speaker or self.DEFAULT_SPEAKER).strip()
-                    is_female = any(name in speaker_str.lower() for name in ["vivian", "emma", "female", "serena"])
+                    is_female = any(name in speaker_str.lower() for name in ["vivian", "emma", "female", "serena", "ono_anna", "sohee", "anna"])
                     gender_tag = "Female" if is_female else "Male"
 
-                    if "aiden" in speaker_str.lower() or "emma" in speaker_str.lower():
+                    if any(name in speaker_str.lower() for name in ["aiden", "dylan", "eric", "ono_anna"]):
                         rate = min(10, rate + 1)
+                    elif "uncle_fu" in speaker_str.lower():
+                        rate = max(-10, rate - 1)
+
                     if instruct and any(k in instruct.lower() for k in ["viral", "fast", "energy", "punchy"]):
                         rate = min(10, rate + 1)
                     elif instruct and any(k in instruct.lower() for k in ["mystery", "crime", "dark", "deep"]):
@@ -267,6 +353,8 @@ $s.Dispose()
                         timeout=max(90, int(len(clean_text) / 2))
                     )
                     if res.returncode == 0 and os.path.exists(abs_out) and os.path.getsize(abs_out) > 500:
+                        if abs(pitch) >= 0.05:
+                            self._apply_pitch_shift_to_file(abs_out, pitch)
                         try:
                             import wave
                             with wave.open(abs_out, 'rb') as wf:
@@ -289,8 +377,8 @@ $s.Dispose()
         n_samples = int(dur * sr)
 
         t = np.linspace(0, dur, n_samples, endpoint=False)
-        is_female = any(name in str(speaker).lower() for name in ["vivian", "emma", "female"])
-        f0 = 200.0 if is_female else 130.0
+        is_female = any(name in str(speaker).lower() for name in ["vivian", "emma", "female", "serena", "ono_anna", "sohee", "anna"])
+        f0 = (200.0 if is_female else 130.0) * (2.0 ** (float(pitch) / 12.0))
         audio = 0.25 * np.sin(2 * np.pi * f0 * t) + 0.12 * np.sin(2 * np.pi * 2 * f0 * t)
         envelope = 0.5 + 0.5 * np.sin(2 * np.pi * 4.0 * t)
         audio = audio * envelope * 0.4
@@ -329,7 +417,7 @@ $s.Dispose()
         except Exception:
             return False
 
-    # 1. Custom Voice (en-US)
+    # 1. Custom Voice (en-US & Multilingual)
     def generate_custom(
         self,
         text: str,
@@ -337,6 +425,8 @@ $s.Dispose()
         speaker: Optional[str] = None,
         instruct: Optional[str] = None,
         speed: float = 1.0,
+        pitch: float = 0.0,
+        temperature: float = 0.70,
         is_preview: bool = False
     ) -> float:
         target_speaker = speaker or self.DEFAULT_SPEAKER
@@ -352,7 +442,9 @@ $s.Dispose()
                 output_path=output_path,
                 speaker=target_speaker,
                 instruct=target_instruct,
-                speed=speed
+                speed=speed,
+                pitch=pitch,
+                temperature=temperature
             )
 
         target_device = self._get_target_device_for_audition() if is_preview else self.device
@@ -360,13 +452,29 @@ $s.Dispose()
 
         if model is not None:
             try:
+                spk_clean = str(target_speaker).strip().lower().replace(" ", "_").replace("-", "_")
+                alias_map = {
+                    "emma": "serena",
+                    "sydney_sweeny": "serena",
+                    "sydney_sweeney": "serena",
+                    "onoanna": "ono_anna",
+                    "unclefu": "uncle_fu",
+                }
+                spk_resolved = alias_map.get(spk_clean, spk_clean)
+                supported_speakers = {"aiden", "dylan", "eric", "ono_anna", "ryan", "serena", "sohee", "uncle_fu", "vivian"}
+                if spk_resolved not in supported_speakers:
+                    is_female = any(f in spk_clean for f in ["female", "donna", "vivian", "emma", "serena", "anna", "sohee", "sydney"])
+                    spk_resolved = "vivian" if is_female else "ryan"
+
                 wavs, sr = model.generate_custom_voice(
                     text=text,
                     language="English",
-                    speaker=target_speaker,
-                    instruct=target_instruct
+                    speaker=spk_resolved,
+                    instruct=target_instruct,
+                    temperature=float(temperature)
                 )
-                SileroVADSilenceTrimmer._write_wav(output_path, wavs[0], sr)
+                final_wav = self._apply_pitch_shift(wavs[0], sr, pitch)
+                SileroVADSilenceTrimmer._write_wav(output_path, final_wav, sr)
                 # Applica VAD trim
                 trimmed_dur = SileroVADSilenceTrimmer.trim_leading_silence(output_path, output_path)
                 return trimmed_dur
@@ -378,27 +486,39 @@ $s.Dispose()
             output_path=output_path,
             speaker=target_speaker,
             instruct=target_instruct,
-            speed=speed
+            speed=speed,
+            pitch=pitch,
+            temperature=temperature
         )
 
     # 2. Voice Clone
     def create_and_cache_clone_profile(self, profile_name: str, ref_audio_path: str, ref_text: Optional[str] = None) -> Path:
-        model = self._load_model("base")
-        profile_file = self.cache_dir / f"{profile_name}.qvoice"
-
-        if model is not None and torch is not None:
-            prompt_items = model.create_voice_clone_prompt(
-                ref_audio=ref_audio_path,
-                ref_text=ref_text or ""
+        if not self._is_model_cached("base"):
+            raise RuntimeError(
+                "I pesi neurali del modello Qwen3-TTS-Base non sono presenti in locale (~4.5 GB necessari). "
+                "Scarica prima i pesi Base da Hugging Face per consentire la clonazione vocale reale."
             )
-            torch.save({
-                "prompt_items": prompt_items,
-                "ref_text": ref_text,
-                "ref_audio": ref_audio_path,
-                "language": "English"
-            }, profile_file)
-        else:
-            profile_file.write_text(f"dummy_clone_profile:{profile_name}", encoding="utf-8")
+
+        model = self._load_model("base")
+        if model is None or torch is None:
+            raise RuntimeError(
+                "Impossibile caricare il modello neurale Qwen3-TTS-Base per la clonazione vocale."
+            )
+
+        profile_file = self.cache_dir / f"{profile_name}.qvoice"
+        xvec_only = not bool(ref_text and ref_text.strip())
+        prompt_items = model.create_voice_clone_prompt(
+            ref_audio=ref_audio_path,
+            ref_text=ref_text.strip() if not xvec_only else None,
+            x_vector_only_mode=xvec_only
+        )
+        torch.save({
+            "prompt_items": prompt_items,
+            "ref_text": ref_text,
+            "ref_audio": ref_audio_path,
+            "language": "English",
+            "x_vector_only_mode": xvec_only
+        }, profile_file)
 
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
@@ -408,33 +528,59 @@ $s.Dispose()
 
         return profile_file
 
-    def generate_cloned(self, text: str, profile_path: str, output_path: str, speed: float = 1.0, is_preview: bool = False) -> float:
+    def generate_cloned(
+        self,
+        text: str,
+        profile_path: str,
+        output_path: str,
+        speed: float = 1.0,
+        pitch: float = 0.0,
+        temperature: float = 0.70,
+        is_preview: bool = False
+    ) -> float:
+        if not profile_path or not os.path.exists(profile_path):
+            raise FileNotFoundError(f"File del profilo vocale non trovato: {profile_path}")
+
+        # Rileva e segnala profili fittizi salvati in precedenza senza pesi neurali
+        try:
+            with open(profile_path, "rb") as f:
+                header = f.read(40)
+                if b"dummy_clone_profile" in header:
+                    raise ValueError(
+                        f"Il profilo vocale '{Path(profile_path).stem}' e' stato creato in precedenza senza i pesi neurali Base (profilo vuoto). "
+                        "Rigenera la clonazione del profilo dopo aver completato il download dei pesi Qwen3-TTS Base."
+                    )
+        except (ValueError, FileNotFoundError):
+            raise
+        except Exception:
+            pass
+
+        if not self._is_model_cached("base"):
+            raise RuntimeError(
+                "I pesi neurali Qwen3-TTS-Base non sono presenti in locale (~4.5 GB). "
+                "Scarica prima i pesi Base per consentire la sintesi neurale della voce clonata."
+            )
+
         target_device = self._get_target_device_for_audition() if is_preview else self.device
         model = self._load_model("base", target_device=target_device)
+        if model is None or torch is None:
+            raise RuntimeError("Impossibile caricare il modello Qwen3-TTS-Base per la sintesi vocale.")
 
-        if model is not None and torch is not None and os.path.exists(profile_path) and profile_path.endswith(".qvoice"):
-            try:
-                saved_data = torch.load(profile_path, map_location=target_device)
-                prompt_items = saved_data["prompt_items"]
-                wavs, sr = model.generate_voice_clone(
-                    text=text,
-                    language="English",
-                    voice_clone_prompt=prompt_items
-                )
-                SileroVADSilenceTrimmer._write_wav(output_path, wavs[0], sr)
-                return SileroVADSilenceTrimmer.trim_leading_silence(output_path, output_path)
-            except Exception as e:
-                log.warning(f"Errore sintesi cloned: {e}")
-
-        # Fallback sintesi con timbro riconoscibile
-        clone_name = Path(profile_path).stem if profile_path else "Cloned"
-        return self._generate_synthetic_speech_fallback(
-            text=text,
-            output_path=output_path,
-            speaker=clone_name,
-            instruct="Cloned voice recreation",
-            speed=speed
-        )
+        try:
+            saved_data = torch.load(profile_path, map_location=target_device)
+            prompt_items = saved_data["prompt_items"]
+            wavs, sr = model.generate_voice_clone(
+                text=text,
+                language="English",
+                voice_clone_prompt=prompt_items,
+                temperature=float(temperature)
+            )
+            final_wav = self._apply_pitch_shift(wavs[0], sr, pitch)
+            SileroVADSilenceTrimmer._write_wav(output_path, final_wav, sr)
+            return SileroVADSilenceTrimmer.trim_leading_silence(output_path, output_path)
+        except Exception as e:
+            log.warning(f"Errore sintesi cloned neurale: {e}")
+            raise RuntimeError(f"Errore generazione voce clonata neurale: {e}")
 
     # 3. Voice Design
     def design_new_voice(self, audition_text: str, voice_description: str, output_audition_path: str) -> float:

@@ -16,9 +16,11 @@ L'applicazione **AI Short Generator 1.0** è concepita secondo i principi del **
 2. **Architettura a Spazio Ottimizzato (Nessun Ingombro Inutile)**:
    - Anziché occupare gran parte della schermata con una mastodontica casella di testo, la gestione degli script è demandata a una **barra di selezione compatta** collegata a **finestre modali dedicate**.
    - L'utente può popolare in anticipo un archivio di testi (repository di idee) tramite una finestra dedicata. Il backend valida ogni inserimento contro lo storico, salvandolo solo se inedito con un **nome di contesto semantico (non casuale)**.
+   - **Editor di Analisi & Suddivisione Clip (`ClipSplitAnalysisModal`)**: Una finestra modale avanzata consente di ispezionare come il testo viene suddiviso in reel/clip short, modificare i parametri temporali al volo, trasferire autonomamente frasi tra le clip (sposta su/giù), editare testi con ricalcolo immediato delle statistiche e personalizzare intro e outro con salvataggio granulare.
    - Uno script utilizzato per generare video short viene marcato permanentemente come `UTILIZZATO` e **bloccato per il futuro**, ma mai dimenticato dallo storico.
-3. **Controllo Vocale & Visivo Avanzato (Qwen3-TTS Suite & Live Safe Zones)**:
+3. **Controllo Vocale & Visivo Avanzato (Qwen3-TTS Suite, Outro Parlata & Live Safe Zones)**:
    - Integrazione completa di **Qwen3-TTS**: Voci Predefinite con istruzioni emotive (`instruct`), **Zero-Shot Voice Cloning** con pre-caching dei profili vocali, **Voice Design** (creazione di voci artificiali da prompt testuale) e streaming audio sub-100ms.
+   - **Cadenza Temporale Ottimizzata & Outro CTA Parlata**: Il video inizia con esattamente $1.0\text{ s}$ di anticipo visivo (durante il quale compare il titolo introduttivo). Segue la narrazione principale; al termine, un intervallo esatto di silenzio naturale di $1.0\text{ s}$ precede la sintesi vocale dell'Outro Call-to-Action (`Follow for part {N}` / `Follow for more!`), sincronizzata con il banner grafico overlay e bonificata da Silero VAD.
    - Un player video interattivo 9:16 posizionato sul lato destro mostra sempre l'anteprima del risultato, con la possibilità di attivare le maschere delle aree sicure (*Safe Zones*) di TikTok, Instagram Reels e YouTube Shorts per garantire che i sottotitoli non siano mai coperti dai pulsanti social.
 
 ### Architettura Desktop Nativa Windows (.exe) — NO WebApp
@@ -74,7 +76,9 @@ Tutta l'interfaccia fa riferimento a un insieme unificato di token cromatici a b
 
 ## 4. Architettura della Schermata Principale (Layout Ottimizzato)
 
-Grazie alla barra compattata per la gestione degli script e alla card multimediale per la Voice Suite, l'interfaccia offre una visione d'insieme chiara e priva di scroll orizzontali:
+Grazie alla barra compattata per la gestione degli script e alla card multimediale per la Voice Suite, l'interfaccia offre una visione d'insieme chiara e priva di scroll orizzontali.
+
+### 4.1. Wireframe e Disposizione dei Moduli
 
 ```
 +----------------------------------------------------------------------------------------------------+
@@ -83,19 +87,19 @@ Grazie alla barra compattata per la gestione degli script e alla card multimedia
 |  COLONNA DI SINISTRA: WORKSPACE DI CONFIGURAZIONE (58%) | COLONNA DI DESTRA: MONITOR 9:16 & BATCH (42%)|
 |                                                         |                                              |
 |  +-- 1. SCRIPT ATTIVO & REPOSITORY -------------------+ |  +-- MONITOR DI ANTEPRIMA (1080x1920) -----+ |
-|  | [ ➕ Nuovo Script ]   [ 📂 Scegli dall'Archivio ]    | |  |                                         | |
+|  | [ ➕ Nuovo Script ] [ 📂 Archivio ] [ ✂️ Suddividi ]| |  |                                         | |
 |  | -------------------------------------------------- | |  |    +-------------------------------+    | |
 |  | SCRIPT ATTIVO:                                     | |  |    |  [ Safe-Zone Overlay: ON ]    |    | |
-|  | Titolo: "Cosmos_BlackHoles_Singularity"             | |  |    |                               |    | |
-|  | Dati  : 96 Words | Stima: ~37.4 s | 1 Clip Short    | |  |    |  [ INTRO BANNER 0.0s-1.5s ]   |    | |
-|  | Stato : [ 🟢 DISPONIBILE ]         [ ✕ Cambia ]     | |  |    |     "Cosmos_BlackHoles part.1"|    | |
+|  | Titolo: "Cosmos_BlackHoles_Singularity" [🗑 Rimuovi] | |    |                               |    | |
+|  | Dati  : 96 Words | ~37.4s | 1 Clip [✂️ Dettaglio]   | |  |    |  [ INTRO BANNER 0.0s-1.0s ]   |    | |
+|  | Stato : [ 🟢 DISPONIBILE ]                         | |  |    |     "Cosmos_BlackHoles part.1"|    | |
 |  +----------------------------------------------------+ |  |    |       (Centro Schermo)        |    | |
 |                                                         | |  |    |                               |    | |
 |  +-- 2. SUITE VOCE QWEN3-TTS (en-US) -----------------+ |  |    |      SOTTOTITOLI ATTIVI       |    | |
 |  | Speaker: [ 👤 Ryan (American Warm Male)         v ] | |  |    |    (Safe-Zone Word-by-word)   |    | |
 |  | Lingua : [ 🇺🇸 English (US) v ] | Stile: [ Viral Hook v]| |  |    +-------------------------------+    | |
 |  | [▶ Ascolta Live ~97ms]    [⚙️ Studio Voce Completo]| |  |                                         | |
-|  +----------------------------------------------------+ |  |  [▶ Play] [ 00:00.6 / 00:39.4 ]   [Vol] | |
+|  +----------------------------------------------------+ |  |  [▶ Play] [ 00:01.1 / 00:39.4 ]   [Vol] | |
 |                                                         |  +-----------------------------------------+ |
 |  +-- 3. BACKGROUND VIDEO POOL (Continuo / Locale & YT)+ |                                              |
 |  | [ 📁 Importa Locale ] [ ⬇️ Scarica YT ] [ 📂 Pool ]| |  +-- GESTIONE BATCH CLIP GENERATE ---------+ |
@@ -107,12 +111,12 @@ Grazie alla barra compattata per la gestione degli script e alla card multimedia
 |  | Snapping   : [ Confini Scena Bounded Right (±1.5s)]| |  +-- CRONOLOGIA AZIONI & LOG DI SISTEMA --+ |
 |  | Ingestion  : [ Zero-Recode Ingestion (Master RAW) ]| |  | [22:15] Script verificato True O(1)     | |
 |  | Stato      : [ 🟢 Idoneo (Pool Minecraft: 14m 20s) ]| |  | [22:16] Qwen3-TTS generato in 3.8s      | |
-|  | [⚙️ Impostazioni Video & Ritaglio On-Demand]       | |  | [22:16] Silero VAD Trim applicato       | |
-|                                                         |  | [22:16] Padding +2.0s (0.5s/1.5s) ok   | |
+|  | [⚙️ Impostazioni Video & Ritaglio On-Demand]       | |  | [22:16] Silero VAD Trim narrazione&outro| |
+|                                                         |  | [22:16] Padding 1.0s/1.0s + pausa 1.0s ok| |
 |  +-- 4. SOTTOTITOLI & SINCRONIZZAZIONE ---------------+ |  | [22:16] Peak Limiter audio -1.0 dB     | |
 |  | Preset Stile: [ Viral Pop (Sabbia Calda)     v ]   | |  +-----------------------------------------+ |
 |  | Auto-Wrap   : [ Bounding Box <= 880px, 2 righe max ]| |                                              |
-|  | Timing: +0.5s pre / +1.5s outro (CTA a -1.0s)       | |  +-- MONITOR ATTIVITÀ MULTI-TASK CONCORRENTI |
+|  | Timing: +1.0s pre / +1.0s outro (CTA parlata TTS)  | |  +-- MONITOR ATTIVITÀ MULTI-TASK CONCORRENTI |
 |  | [⚙️ Tipografia & Personalizzazione Avanzata]        | |  | 🚀 VRAM Phase 1/3 (TTS): [====o     ] 45%  | |
 |  +----------------------------------------------------+ |  |    (VRAM Net: 2.5 GB / Limite Tot: 4.0 GB)| |
 |                                                         |  | ⬇️ Zero-Recode Ingestion: 1 video (2s)   | |
@@ -146,6 +150,25 @@ La GUI è progettata per consentire all'utente di operare in modo completamente 
    - Al termine di ogni elaborazione, una discreta notifica toast non-fluo informa l'utente senza sottrarre il focus dalla scrittura o dai menu aperti.
 
 ---
+
+### 4.3. Persistenza Completa della Sessione di Progetto (`session_state.json`) & Auto-Ripristino
+
+Per assicurare la massima affidabilità ed evitare la perdita accidentale del lavoro in caso di chiusura imprevista o riavvio dell'applicazione:
+
+1. **Persistenza JSON dello Stato di Lavoro (`app_data/session_state.json`)**:
+   - L'applicazione salva silenziosamente e istantaneamente su disco l'intero stato del progetto ad ogni modifica dell'utente e all'uscita (`closeEvent` di `MainWindow`).
+   - Il payload memorizzato comprende:
+     - `active_script_id` e `active_script_data`: metadati dello script, testo completo, conteggio parole e caratteri, durate calcolate.
+     - `active_timing_config`: durata massima target ($T_{\max}$), tolleranza ($\pm\Delta$), velocità WPS, padding intro/outro, pausa silenziosa dell'outro, elenco dei chunk personalizzati (`custom_chunks`), titoli intro personalizzati (`custom_intros`) e outro personalizzate (`custom_outros`).
+     - `active_voice_config`: speaker, lingua, profilo emotivo `instruct`, velocità.
+     - `active_video_category`: categoria tematica selezionata (es. `Minecraft`, `GTA V`, `Subway Surfers`).
+     - `active_subtitle_config`: stile e preset dei sottotitoli.
+     - `active_bgm_config`: traccia musicale attiva e parametri di ducking audio.
+     - Flag di controllo: `has_active_project` e `rendered_complete`.
+2. **Algoritmo di Avvio Intelligente (`_restore_session_or_start_fresh`)**:
+   - All'avvio dell'applicazione:
+     - **Caso A (Lavoro in Corso Non Renderizzato)**: se `has_active_project = True` e `rendered_complete = False`, l'ambiente di lavoro viene ripristinato al $100\%$ istantaneamente. Lo script attivo, la suddivisione delle clip, le durate, la voce e la categoria video tornano nello stato esatto in cui l'utente le aveva lasciate.
+     - **Caso B (Render Precedente Completato o Workspace Vuoto)**: se l'ultimo video era stato prodotto con successo oppure la card era stata svuotata, l'interfaccia si avvia in modalità pulita (*Clean Slate*), azzerando lo script attivo ma mantenendo intatti i preset globali preferiti (voce, sottotitoli, categoria).
 
 ---
 
@@ -281,7 +304,146 @@ Nella seconda scheda sono raccolti i testi già trasformati in video short. Cias
 
 ---
 
-### 5.3. Finestra Modale 3: Download & Accodamento Multi-Video YouTube (`VideoDownloadModal`)
+### 5.3. Finestra Modale 3: Analisi, Suddivisione Clip Avanzata & Parametri Temporali Dinamici (`ClipSplitAnalysisModal`)
+*Si apre dal Modulo 1 della Schermata Principale tramite il pulsante `[ ✂️ Suddivisione Clip & Parametri ]` (nell'header della card) o tramite il pulsante compatto `[ ✂️ Dettaglio Clip ]` affianco alle statistiche dello script attivo. Permette di ispezionare come il testo viene suddiviso in reel/short, calibrare interattivamente le costanti temporali, trasferire porzioni di testo tra le clip senza alterare la punteggiatura e personalizzare intro e outro con salvataggio atomico.*
+
+```
++--------------------------------------------------------------------------------------------------------------------+
+| [X] CHIUDI          ANALISI & SUDDIVISIONE CLIP — EDITOR AVANZATO         [ 🔄 Reset Default ] [ ✓ Salva & Chiudi ]|
++--------------------------------------------------------------------------------------------------------------------+
+| Modifica il testo tra le clip, personalizza titoli, Intro e Outro con salvataggio per singola clip o globale.      |
+|--------------------------------------------------------------------------------------------------------------------|
+| PANNELLO SINISTRO: PARAMETRI & STATISTICHE (38%)         | PANNELLO DESTRO: TITOLO, TESTO & SCOMPOSIZIONE (62%)    |
+|                                                          |                                                         |
+| +-- ⚙️ PARAMETRI TEMPORALI DINAMICI -------------------+ | +-- TITOLO PROGETTO / SHORT --------------------------+ |
+| | Preset: [45s Standard] [30s Rapido] [60s] [15s Flash]  | | | TITOLO: [ Cosmos_BlackHoles_Singularity           ] | |
+| |                                                      | | +-----------------------------------------------------+ |
+| | Durata Max Video (s):     [=======o======] [ 45.0s ] | |                                                         |
+| | Tolleranza Taglio ±Δ (s): [=====o========] [  7.0s ] | | SUDDIVISIONE CLIP IN TEMPO REALE (2 CLIP)               |
+| | Velocità Voce (WPS):      [====o=========] [  2.50 ] | | [ ➕ Aggiungi Nuova Clip ]  [ 🔄 Ricalcola Suddivisione ]|
+| |                           ~150 WPM (American Eng)    | |                                                         |
+| | Padding Intro Video (s):  [===o==========] [  1.0s ] | | +-- 🎬 CLIP #1 DI 2 ----------------------------------+ |
+| | Padding Outro Video (s):  [===o==========] [  1.0s ] | | | 🟢 OTTIMALE: ~41.8s       [ 🏷️ Intro: "Cosmos part.1" ✏️]|
+| | Pausa Silenzio Outro (s): [===o==========] [  1.0s ] | | | Voce: ~37.8s | Pausa: 1.0s | Outro: ~1.0s | Pad: +2.0s|
+| |                                                      | | | 94 parole | 592 caratteri                            |
+| | +--------------------------------------------------+ | | | +-------------------------------------------------+ | |
+| | | 🎯 Finestra Video: 38.0s — 45.0s                 | | | | | Deep in the vast expanse of the cosmos,         | | |
+| | |    (Audio Narrazione: da 36.0s a 43.0s max)      | | | | | supermassive black holes bend the fabric of     | | |
+| | +--------------------------------------------------+ | | | | space and time. Their gravitational pull is     | | |
+| +------------------------------------------------------+ | | | | so immense that not even light can escape...    | | |
+|                                                          | | | +-------------------------------------------------+ | |
+| +-- 📊 STATISTICHE GLOBALI SCRIPT ---------------------+ | | | [ ⬆️ Frase su ] [ ⬇️ Frase giù ] [ 🔗 Unisci ] [🗑] [📋]|
+| | Numero Clip Totali   : 2 Short                       | | | 🗣️ Outro Spoken: "Follow for part 2." | Bnr: "..." ✏️ |
+| | Durata Totale Video  : ~01m 24.2s (84.2 s)           | | +-----------------------------------------------------+ |
+| | Durata Totale Voce   : ~75.6 s                       | |                                                         |
+| | Durata Media per Clip: ~42.1 s                       | | +-- 🎬 CLIP #2 DI 2 ----------------------------------+ |
+| | Parole / Caratteri   : 189 / 1,180                   | | | 🟢 OTTIMALE: ~42.4s       [ 🏷️ Intro: "Cosmos part.2" ✏️]|
+| +------------------------------------------------------+ | | | Voce: ~38.4s | Pausa: 1.0s | Outro: ~1.0s | Pad: +2.0s|
+|                                                          | | | 95 parole | 588 caratteri                            |
+| [ 💾 Salva & Applica alla Produzione ]                 | | | +-------------------------------------------------+ | |
+|                                                          | | | | However, what happens inside a singularity      | | |
+|                                                          | | | | remains one of the greatest unsolved mysteries  | | |
+|                                                          | | | | of modern physics. Future space telescopes      | | |
+|                                                          | | | | might finally provide the answers...            | | |
+|                                                          | | | +-------------------------------------------------+ | |
+|                                                          | | | [ ⬆️ Frase su ] [ ⬇️ Frase giù ] [ 🔗 Unisci ] [🗑] [📋]|
+|                                                          | | | 🗣️ Outro Spoken: "Follow for more." | Bnr: "..." ✏️  |
+|                                                          | | +-----------------------------------------------------+ |
++--------------------------------------------------------------------------------------------------------------------+
+```
+
+#### Architettura Esecutiva di `ClipSplitAnalysisModal`
+1. **Pannello Sinistro: Controllo Dinamico dei Parametri Temporali**:
+   - **Preset di Taratura Rapida**:
+     - `45s Standard`: Target $45.0\text{s}$, $\Delta = 7.0\text{s}$, $2.50\text{ WPS}$, Padding $1.0\text{s} / 1.0\text{s}$, Pausa $1.0\text{s}$.
+     - `30s Rapido`: Target $30.0\text{s}$, $\Delta = 5.0\text{s}$, $2.65\text{ WPS}$, Padding $0.8\text{s} / 0.8\text{s}$, Pausa $0.8\text{s}$.
+     - `60s Lungo`: Target $60.0\text{s}$, $\Delta = 8.0\text{s}$, $2.40\text{ WPS}$, Padding $1.0\text{s} / 1.2\text{s}$, Pausa $1.0\text{s}$.
+     - `15s Flash`: Target $15.0\text{s}$, $\Delta = 3.0\text{s}$, $2.80\text{ WPS}$, Padding $0.5\text{s} / 0.5\text{s}$, Pausa $0.5\text{s}$.
+   - **Accoppiamento Bidirezionale Slider & DoubleSpinBox**:
+     - Regolazione continua e fluida: muovendo lo slider si aggiorna lo spinbox numerico al decimo di secondo (o centesimo per WPS), e viceversa.
+     - Indicatore WPM in tempo reale: la velocità WPS mostra a video la conversione istantanea in parole al minuto (es. $2.50\text{ WPS} \implies \sim 150\text{ WPM}$).
+   - **Banner Finestra Video & Voce Calcolata**:
+     - Mostra istantaneamente l'intervallo video consentito $[T_{\max} - \Delta, T_{\max}]$ e la finestra audio per la narrazione (al netto del padding), fornendo al creatore un riscontro matematico immediato.
+   - **Statistiche Globali Aggiornate ad Ogni Digitazione**:
+     - Calcolo in tempo reale di: numero di clip Short totali, durata complessiva video (con formattazione leggibile in minuti e secondi, es. `1m 24s`), durata voce totale, durata media per clip, totale parole e caratteri.
+2. **Pannello Destro: Modifica Titolo, Segmentazione Live & Spostamento Testo tra Clip**:
+   - **Titolo Progetto / Short Dinamico (`QLineEdit`)**:
+     - Modificabile in tempo reale. L'aggiornamento propaga immediatamente il nuovo titolo al database SQLite locale (`scripts.context_title`), aggiorna la card principale e rigenera le etichette intro di ciascuna clip (`[Titolo] part.1`, `[Titolo] part.2`, ecc.) per tutte le clip che non abbiano un titolo intro esplicitamente sovrascritto.
+   - **Azioni Rapide Toolbar Clip**:
+     - `[ ➕ Aggiungi Nuova Clip ]`: inserisce una nuova clip vuota in coda all'elenco.
+     - `[ 🔄 Ricalcola Suddivisione Automatica ]`: riesegue l'algoritmo di chunking discorsivo linguistico `DiscourseCoherenceChunker` ripartendo dal testo globale unificato.
+   - **Card Individuale Clip (`ClipCardWidget`)**:
+     - **Badge di Durata Cromatico**:
+       - 🟢 `OTTIMALE`: video compreso nella finestra target $[T_{\max} - \Delta, T_{\max}]$.
+       - 🟡 `FINALE / BREVE`: video sotto la soglia minima (fisiologico per l'ultima clip di chiusura).
+       - 🔴 `LUNGA`: video oltre il tempo massimo consentito.
+     - **Pulsante Intro Interattivo**: mostra il banner introduttivo della clip (es. `🏷️ Intro: "Cosmos part.1" ✏️`) e apre con un clic il dialogo di editing dedicato.
+     - **Area di Testo Multiriga ad Alta Visibilità**:
+       - Confortevole casella di testo (`QPlainTextEdit`) con altezza minima garantita $\ge 140\text{px}$ (almeno 6 righe di testo ben visibili a video).
+       - Modificabile direttamente dall'utente: ogni variazione ricalcola al volo parole, caratteri e durate della clip e dell'intero progetto senza spostare il cursore né interrompere la digitazione.
+     - **Spostamento Autonomo del Testo tra le Singole Clip**:
+       - `[ ⬆️ Frase su (alla precedente) ]`: individua la prima frase completa (separata da punteggiatura forte `.!?`) e la trasferisce in coda alla clip precedente.
+       - `[ ⬇️ Frase giù (alla successiva) ]`: individua l'ultima frase completa e la trasferisce in testa alla clip successiva.
+       - `[ 🔗 Unisci con successiva ]`: fonde il testo con la clip sottostante ed elimina la riga ridondante.
+       - `[ 🗑 Elimina clip ]`: rimuove la clip redistribuendo indici e numerazioni.
+       - `[ 📋 Copia ]`: copia negli appunti con feedback visivo temporaneo di $1.5\text{s}$.
+     - **Riga Outro Cliccabile & Regola dell'Avviso in Rosso per Asimmetria**:
+       - Pulsante interattivo `[ 🗣️ Outro Spoken: "..." | Banner: "..." ✏️ ]`.
+       - **Regola di Sicurezza Visiva**: se l'utente personalizza le outro delle clip intermedie ma lascia l'outro finale sui valori standard, o viceversa personalizza solo la finale lasciando le intermedie non configurate, il sistema espone affianco al pulsante un **testo in rosso brillante (`#FF5555`)**:
+         `⚠️ Outro finale standard non ancora personalizzata!` oppure `⚠️ Outro intermedia non ancora personalizzata!`.
+
+---
+
+#### Finestrella di Dialogo Dedicata: Modifica Granulare Intro & Outro (`IntroOutroEditDialog`)
+Cliccando sul pulsante dell'Intro o dell'Outro all'interno di qualsiasi clip card, si apre la finestra di dialogo dedicata (540x460 px):
+
+```
++----------------------------------------------------------------------+
+| [X] CHIUDI          MODIFICA INTRO & OUTRO — CLIP #1 DI 2            |
++----------------------------------------------------------------------+
+| MODIFICA INTRO & OUTRO — CLIP #1 DI 2         [ 🟡 CLIP INTERMEDIA #1]|
+|                                                                      |
+| Questa è una clip intermedia (porta alla clip #2).                   |
+| Se la applichi a tutto il progetto, aggiornerà solo le clip          |
+| intermedie senza toccare quella finale.                              |
+|                                                                      |
+| +-- TITOLO INTRO / BANNER A SCHERMO -------------------------------+ |
+| | [ Cosmos_BlackHoles part.1                                     ] | |
+| +------------------------------------------------------------------+ |
+|                                                                      |
+| +-- OUTRO PARLATO & BANNER OVERLAY --------------------------------+ |
+| | OUTRO PARLATO DAL TTS (Sintesi Vocale):                          | |
+| | [ Follow for part {next_part}.                                 ] | |
+| |                                                                  | |
+| | OUTRO BANNER A SCHERMO (Grafica Overlay):                        | |
+| | [ Follow for part.{next_part}                                  ] | |
+| |                                                                  | |
+| | 💡 Suggerimento: {next_part} verrà sostituito con il numero      | |
+| |    della clip successiva (es. part.2, part.3)                    | |
+| +------------------------------------------------------------------+ |
+|                                                                      |
+| [ 🔗 Applica a TUTTE le Intermedie (Clip 1..N-1) del Progetto ]      |
+| [ ⭐ Imposta come Default Predefinito Globale ]                       |
+|                                                                      |
+| ✓ Modifiche salvate automaticamente per questa clip  [ Fatto / Chiudi]|
++----------------------------------------------------------------------+
+```
+
+1. **Badge di Tipologia & Istruzioni Contestuali**:
+   - `🟡 CLIP INTERMEDIA #X`: avvisa chiaramente che la clip è un anello di congiunzione narrativo che rimanda alla parte successiva.
+   - `🔴 CLIP FINALE`: avvisa chiaramente che la clip è l'epilogo della serie e chiude la narrazione.
+2. **Supporto al Token Dinamico `{next_part}`**:
+   - Nelle clip intermedie, il token `{next_part}` viene risolto automaticamente dal motore con l'indice incrementale della clip successiva (es. nella Clip 1 diventa `part 2`, nella Clip 2 diventa `part 3`), sia per l'audio TTS che per il testo a schermo.
+3. **Le Tre Modalità di Salvataggio**:
+   - **Salvataggio Istantaneo per la Singola Clip**: ogni carattere digitato nei campi viene emesso in tempo reale (`save_single`) e memorizzato per quella specifica clip **senza dover premere alcun pulsante di conferma**.
+   - **`[ 🔗 Applica a tutto il Progetto ]`**: propaga la personalizzazione a tutte le clip compatibili della serie:
+     - Se applicato da una clip intermedia, aggiorna **esclusivamente le clip intermedie ($1 \dots N-1$)** preservando la sostituzione progressiva di `{next_part}` e lasciando la clip finale inalterata.
+     - Se applicato dalla clip finale, aggiorna **esclusivamente la clip finale ($N$)** senza alterare le outro progressive intermedie.
+   - **`[ ⭐ Imposta come Default Predefinito Globale ]`**: memorizza il template corrente nel motore dell'applicazione, rendendolo la configurazione predefinita per tutti i futuri progetti e importazioni di script.
+
+---
+
+### 5.4. Finestra Modale 4: Download & Accodamento Multi-Video YouTube (`VideoDownloadModal`)
 *Consente di incollare e scaricare più video YouTube o importare video locali a Ricodifica Zero (< 3s per video), classificandoli automaticamente per categoria tematica.*
 
 ```
@@ -320,7 +482,7 @@ Nella seconda scheda sono raccolti i testi già trasformati in video short. Cias
 
 ---
 
-### 5.4. Finestra Modale 4: Libreria Video Background & Pool a Flusso Continuo (`VideoLibraryModal`)
+### 5.5. Finestra Modale 5: Libreria Video Background & Pool a Flusso Continuo (`VideoLibraryModal`)
 *Permette di consultare lo stato del Video Pool con categorie tematiche. **Di default l'assegnazione è 100% Automatica**, ma consente l'override manuale o il cambio categoria.*
 
 ```
@@ -357,7 +519,7 @@ Nella seconda scheda sono raccolti i testi già trasformati in video short. Cias
 
 ---
 
-### 5.5. Dialog di Avviso: Risoluzione Continuità Tematica per Categoria/Gioco
+### 5.6. Dialog di Avviso: Risoluzione Continuità Tematica per Categoria/Gioco
 *Viene mostrato se l'utente tenta di produrre una storia in una categoria priva di materiale continuativo sufficiente.*
 
 ```
@@ -381,7 +543,7 @@ Nella seconda scheda sono raccolti i testi già trasformati in video short. Cias
 
 ---
 
-### 5.6. Finestra Modale 5: Coda di Produzione Multi-Storia, Personalizzazione per Script & Audit Preventivo (`BatchQueueManagerModal`)
+### 5.7. Finestra Modale 6: Coda di Produzione Multi-Storia, Personalizzazione per Script & Audit Preventivo (`BatchQueueManagerModal`)
 *Consente di comporre una coda di lavoro con storie multiple, personalizzare voce e font in modo indipendente per ciascun testo, propagare le impostazioni a tutta la coda con un clic, e verificare preventivamente la fattibilità dell'intera produzione contro il Video Pool.*
 
 ```
@@ -463,7 +625,7 @@ Nella seconda scheda sono raccolti i testi già trasformati in video short. Cias
 
 ---
 
-### 5.7. Gestione della Garbage Collection Automatica dei Residui (1m 30s con tolleranza +20s / -inf)
+### 5.8. Gestione della Garbage Collection Automatica dei Residui (1m 30s con tolleranza +20s / -inf)
 Quando una sessione di generazione consuma secondi da un video master continuo:
 1. **Soglia Minima Reel**: Nessuno Short può durare meno di **$38.0\text{ secondi}$**.
 2. **Finestra di Scarto Residuo**:
@@ -477,7 +639,7 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
 
 ---
 
-### 5.8. Drawer 1: Studio Voce Avanzato & Voice Intelligence (Qwen3-TTS en-US)
+### 5.9. Drawer 1: Studio Voce Avanzato & Voice Intelligence (Qwen3-TTS en-US)
 *Accessibile dal Modulo 2 tramite il pulsante `[⚙️ Studio Voce Completo]` o cliccando sul badge della voce in qualsiasi riga della Coda Batch. Ottimizzato nativamente per la lingua **Inglese Americano (`en-US`)** con supporto per **Demo Audio (Max 5s)**, **Preset Persistenti**, **Propagazione alla Coda** e **Auto-Salvataggio alla Chiusura**.*
 
 ```
@@ -490,14 +652,13 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
 | Preset Voce Attivo : [ 📂 US_ViralHook_Ryan (American Male, 150 WPM)   v ] [ 💾 Salva Nuovo Preset ]|
 | Azione Rapida Coda : [ 🔗 Applica Questa Voce a Tutte le Storie in Coda ]                          |
 | -------------------------------------------------------------------------------------------------- |
-| [ TAB 1: PRESET VOCI US ] [ TAB 2: VOICE CLONE ] [ TAB 3: VOICE DESIGN ] [ LIBRERIA PROFILI ]     |
+| [ VOCI STANDARD ] [ VOICE CLONE ] [ VOICE DESIGN ] [ LIBRERIA PROFILI ]                           |
 +----------------------------------------------------------------------------------------------------+
 |                                                                                                    |
-| === SEZIONE ATTIVA: TAB 1 - VOCI PREDEFINITE & INSTRUCTION GUIDATA (en-US) ===                     |
+| === SEZIONE ATTIVA: VOCI STANDARD ===                                                              |
 |                                                                                                    |
 | Speaker Ufficiale Americano : [ Ryan (Natural Warm Male - American Accent)                     v ] |
 | (Disponibili anche: Aiden [Dynamic Young US], Vivian [Warm Female], Emma [Expressive Narrator])    |
-| Lingua di Sintesi Primaria  : [ 🇺🇸 English (United States) - en-US                            v ] |
 |                                                                                                    |
 | PRESET DI GUIDA EMOTIVA & PROSODIA PER SHORT VIRALI (`instruct`):                                  |
 | [ Preset: Viral Hook (High energy, punchy pace, emphasizes keywords)                            v ]|
@@ -515,32 +676,28 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
 | Pausa su Punto Fermo (.)     : [====o========] 350 ms   | Pausa su Virgola (,): [==o====] 150 ms   |
 |                                                                                                    |
 | -------------------------------------------------------------------------------------------------- |
-| 🎧 ANTEPRIMA RAPIDA VOCE (DEMO AUDIO RIGOROSAMENTE LIMITATA A MAX 5.0 SECONDI):                    |
-| Frase di Test: "Black holes are among the most mysterious cosmic titans in the entire universe..." |
-| [ ▶ Ascolta Demo Audio (Max 5.0s) ]   [ ■ Stop ]    Progresso: [======o      ] 00:02.8 / 00:05.0   |
-| * Nota di Efficienza: Il motore genera solo i primi 5 secondi con micro-fadeout di 50ms,           |
-|   garantendo un riscontro sonoro ultra-veloce senza generare l'intero audio dello Short.           |
+| 🎧 BANCO DI PROVA BENCHMARK (4 TEST STANDARD AUDIO LIMITATI A MAX 5.0 SECONDI):                   |
+| [ 🎯 Bilanciamento Fonetico ] [ 📖 Contesto ] [ 🎭 Emozione ] [ 🌐 Gestione del Formato ]           |
+| Frase Attiva: "The box was thrown beside the parked truck." / "The soldier decided to desert..."   |
+| [ ■ Stop ]    Progresso: [======o      ] 00:02.8 / 00:05.0                                         |
 | -------------------------------------------------------------------------------------------------- |
 |                                                                                                    |
-| === SEZIONE ATTIVA: TAB 2 - CLONAZIONE VOCALE AVANZATA (ZERO-SHOT CLONING) ===                     |
+| === SEZIONE ATTIVA: VOICE CLONE ===                                                               |
+| Stato Modello Base: 🟢 Modello Base Qwen3-TTS (1.7B) Pronto per la Clonazione Neurale              |
 |                                                                                                    |
-| 1. AUDIO DI RIFERIMENTO (Da 3 a 15 secondi di voce chiara):                                        |
-|    [ Sfoglia File (.wav, .mp3, .m4a) ]  oppure  [ 🎙️ Registra Microfono ]                          |
+| 1. AUDIO DI RIFERIMENTO (Da 3 a 15 secondi di voce chiara en-US):                                 |
+|    [ Sfoglia File (.wav, .mp3, .m4a) ]                                                             |
 |    File Caricato: "reference_voice_sample.wav" (Durata: 6.2s | Frequenza: 44.1kHz)                 |
 |                                                                                                    |
-| 2. TRASCRIZIONE AUDIO DI RIFERIMENTO (Necessaria per condizionamento acustico):                    |
+| 2. TRASCRIZIONE AUDIO DI RIFERIMENTO (Condizionamento acustico opzionale):                         |
 |    [ Welcome back to another video, today we are exploring...                                    ] |
 |    [ ✨ Auto-Trascrivi con Faster-Whisper (en) ]  <-- Compilazione automatica a zero sforzo         |
 |                                                                                                    |
 | 3. PROFILAZIONE PERSISTENTE & CACHING:                                                             |
-|    Nome Profilo Vocale : [ Ryan_Creator_Clone                                                    ] |
+|    Nome Profilo Vocale : [ My_Creator_Clone                                                      ] |
 |    [ 💾 Estrai & Salva Profilo Vocale (.qvoice) ]                                                  |
-|    * Nota: Il profilo calcola i pesi una sola volta. Nei montaggi successivi la voce               |
-|      partirà all'istante senza ricalcolare l'audio sorgente!                                        |
-|                                                                                                    |
-| 4. CONDIZIONAMENTO VOCALE (en-US):                                                                 |
-|    Lingua di Sintesi: 🇺🇸 English (US) nativo garantito                                            |
-|    Accento Target: General American Accent (Integrazione Qwen3-TTS Base 1.7B)                      |
+|    Barra Avanzamento : [=============================] 100% (Clonazione completata con successo!)  |
+|    [ ▶ Testa Subito Voce Clonata (Max 5.0s) ]                                                      |
 |                                                                                                    |
 | -------------------------------------------------------------------------------------------------- |
 |                                                                                                    |
@@ -572,10 +729,14 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
    - Propaga all'istante l'intera identità vocale selezionata a tutti gli altri elementi presenti nella Coda Batch aperta.
 6. **Salvataggio Automatico alla Chiusura (Auto-Save on Close)**:
    - Ogni modifica viene salvata in modo asincrono nel database non appena l'utente chiude la finestra.
+7. **Sintesi Outro Vocale Dedicata & Concatenazione Atomica (`SileroVADSilenceTrimmer.stitch_narration_and_outro`)**:
+   - Nella pipeline di produzione, il motore vocale sintetizza sia il testo principale dello Short che la frase di chiusura Outro (`outro_spoken`, es. `"Follow for part 2."` o template personalizzato) con lo stesso identico profilo timbrico e velocità.
+   - **Trimming Adattivo a Finestra Temporale**: Prima della fusione, Silero VAD applica un algoritmo di rimozione dei silenzi di testa con persistenza energetica a finestra (80ms su frame da 20ms) che ignora click o respiri isolati sub-50ms senza tagliare l'attacco delle consonanti.
+   - **Stitching Audio Millimetrico**: Le due tracce WAV vengono concatenate inserendo una pausa di silenzio naturale esattamente calibrata di $1.000\text{ s}$ (`OUTRO_PAUSE_SEC`), restituendo al compositor la durata esatta di narrazione, pausa e outro.
 
 ---
 
-### 5.9. Drawer 2: Studio Video, Conform 9:16 & Taglio On-Demand
+### 5.10. Drawer 2: Studio Video, Conform 9:16 & Taglio On-Demand
 *Accessibile dal Modulo 3 tramite il pulsante `[⚙️ Impostazioni Video]`:*
 
 ```
@@ -596,10 +757,12 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
 |                                   [ Scala e Centra (Aspect Ratio)  ] |
 | Risoluzione Master Ingestion    : [ 1080 x 1920 (Full HD Vertical) v ]|
 | Frame Rate Target               : [ 60 FPS                         v]|
-| SINCRONIZZAZIONE & PADDING AUDIO-VIDEO (LEAD-IN 0.5s & OUTRO 1.5s)   |
-| Lead-in Video (Anticipo Inizio) : [=====o======] 0.50 secondi        |
-| Lead-out Video (Coda Post-Voce) : [========o==] 1.50 secondi        |
-| * Stacco Speech a -1.5s; CTA Banner a -1.0s fino a fine video        |
+| SINCRONIZZAZIONE & PADDING AUDIO-VIDEO (LEAD-IN 1.0s & OUTRO 1.0s)   |
+| Lead-in Video (Anticipo Inizio) : [=====o======] 1.00 secondi        |
+| Lead-out Video (Coda Post-Voce) : [=====o======] 1.00 secondi        |
+| Pausa Silenzio Outro (TTS Pause): [=====o======] 1.00 secondi        |
+| * Speech narrativo con avvio a +1.00s; Pausa di 1.0s prima dell'Outro |
+| * Outro CTA parlata da Qwen3-TTS e sincronizzata con Outro Banner     |
 | * Durata Totale Short: T_video = (Durata Voce + 2.00 s)              |
 |                                                                      |
 | GESTIONE RISORSE HARDWARE                                            |
@@ -612,7 +775,7 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
 
 ---
 
-### 5.10. Drawer 3: Subtitle Designer, Anteprima Visiva Live (9:16) & Preset Tipografici
+### 5.11. Drawer 3: Subtitle Designer, Anteprima Visiva Live (9:16) & Preset Tipografici
 *Accessibile dal Modulo 4 tramite il pulsante `[⚙️ Tipografia & Personalizzazione]` o cliccando sul badge del font/stile in qualsiasi riga della Coda Batch. Include **Anteprima Visiva Live 9:16**, **Salvataggio/Caricamento Preset Font**, **Propagazione Universale alla Coda** e **Auto-Salvataggio alla Chiusura**.*
 
 ```
@@ -666,19 +829,22 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
    - È possibile navigare tra le diverse parti assegnate alla storia (`Parte 1`, `Parte 2`, ecc.) e regolare il timestamp tramite cursore di scrubbing per verificare il sottotitolo su fotogrammi differenti.
 2. **Auto-Impaginazione Rigorosa & Anti-Overflow Schermo (1080px)**:
    - Per impedire che parole con font grandi (68-72 pt) escano dai bordi laterali dello schermo 9:16, il generatore impone:
-     - Massimo **3 parole per riga**.
-     - Massimo **2 righe per evento a schermo** (tetto massimo 6 parole visibili contemporaneamente).
-     - Ritorno a capo naturale `\N` calcolato prima del rendering per preservare il perfetto baricentro orizzontale.
-3. **Preset Tipografici Persistenti (`subtitle_presets`)**:
+      - Massimo **3 parole per riga**.
+      - Massimo **2 righe per evento a schermo** (tetto massimo 6 parole visibili contemporaneamente).
+      - Ritorno a capo naturale `\N` calcolato prima del rendering per preservare il perfetto baricentro orizzontale.
+3. **Banner Intro & Outro CTA Coordinati**:
+   - **Intro Title Banner**: attivo a centro schermo da $0.0\text{s}$ a $1.0\text{s}$ (`INTRO_BANNER_END_SEC = 1.000`), scomparendo esattamente quando attacca la narrazione vocale.
+   - **Outro CTA Banner**: entra a centro schermo sincronizzato al millisecondo con la fine della narrazione e l'inizio dell'audio TTS Outro (default `"Follow for part.{next_part}"` o `"Follow for more!"`).
+4. **Preset Tipografici Persistenti (`subtitle_presets`)**:
    - Consente di salvare template completi di stile (es. *Viral Gold Pop*, *Slate Crime Thriller*, *Clean White Sans*) pronti per essere applicati con un solo clic.
-4. **Pulsante "Applica Questo Font a Tutte le Storie in Coda"**:
+5. **Pulsante "Applica Questo Font a Tutte le Storie in Coda"**:
    - Uniforma all'istante l'intera coda di lavoro sullo stile grafico configurato.
-5. **Salvataggio Automatico alla Chiusura (Auto-Save on Close)**:
+6. **Salvataggio Automatico alla Chiusura (Auto-Save on Close)**:
    - Tutte le proprietà grafiche dello script attivo o del preset vengono salvate nel database alla chiusura della finestra.
 
 ---
 
-### 5.11. Drawer 4: Audio Mixing, Background Music (BGM), Mastering & True Peak Limiter
+### 5.12. Drawer 4: Audio Mixing, Background Music (BGM), Mastering & True Peak Limiter
 *Accessibile dal controllo volume/audio o tramite il pulsante `[🎵 Musica di Sottofondo]`. Consente di incollare direttamente **link YouTube** per le tracce audio in background o utilizzare la libreria Safe CC0 integrata.*
 
 ```
@@ -714,7 +880,7 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
 | SEZIONE 3: AUTO-DUCKING DINAMICO SENZA POP/CLIC                                                    |
 | [X] Attiva Auto-Ducking Morbido (Curve continue senza gradini impulsivi)                            |
 | Volume Musica durante il Parlato (Voice Active) : [===o=========] -22.0 dB                         |
-| Volume Musica durante Intro (0.5s) ed Outro (1.5s) : [=====o======] -14.0 dB (Swell + CTA a -1.0s)  |
+| Volume Musica durante Intro (1.0s) ed Outro (1.0s) : [=====o======] -14.0 dB (Swell + Outro CTA)   |
 | Tempo di Transizione / Rilascio Ducking         : [==o==========] 180 ms                           |
 |                                                                                                    |
 | -------------------------------------------------------------------------------------------------- |
@@ -744,36 +910,42 @@ Quando una sessione di generazione consuma secondi da un video master continuo:
 
 ---
 
-### 5.12. Architettura dei Preset Persistenti & Salvataggio Automatico Globale (Auto-Save on Close)
+### 5.13. Architettura dei Preset Persistenti, Session State & Salvataggio Automatico Globale (Auto-Save on Close)
 
 Per garantire un'esperienza utente priva di attriti e prevenire qualsiasi perdita di dati o impostazioni:
 
 #### 1. Principio dell'Auto-Salvataggio Sistematico alla Chiusura (`closeEvent`)
-In tutta l'applicazione (Finestra Principale, Finestre Modali 1-5, Drawer 1-4), ogni interfaccia eredita da una classe base `AutoSaveDialog` / `AutoSaveDrawer` collegata al ciclo di vita Qt:
+In tutta l'applicazione (Finestra Principale, Finestre Modali 1-6, Drawer 1-4), ogni interfaccia eredita da una classe base `AutoSaveDialog` / `AutoSaveDrawer` collegata al ciclo di vita Qt:
 - **Evento di Chiusura Intercettato**: Cliccare sul pulsante `[X]`, premere il tasto `Esc` o chiudere il cassetto laterale non scarta mai le modifiche, ma scatena automaticamente la persistenza asincrona dello stato nel database SQLite (`settings`, `queue_items`, `script_drafts`).
-- **Nessun Modale Modale di Conferma Intrusivo**: Non compare alcun pop-up che chiede *"Vuoi salvare prima di uscire?"*. L'app salva silenziosamente e conferma l'azione con una leggera micro-animazione dell'indicatore `[ Auto-Save on Close: ON 🟢 ]`.
+- **Nessun Modale di Conferma Intrusivo**: Non compare alcun pop-up che chiede *"Vuoi salvare prima di uscire?"*. L'app salva silenziosamente e conferma l'azione con una leggera micro-animazione dell'indicatore `[ Auto-Save on Close: ON 🟢 ]`.
 
 #### 2. Sistema di Salvataggio e Caricamento Preset (Voci e Font)
 - **Preset Voce**: Memorizzati nella tabella `voice_presets`, archiviano speaker americano (`Ryan`, `Aiden`), profilo di clonazione (`.qvoice`), parametri emotivi di recitazione `instruct`, velocità WPM (con limite $\le 44.0\text{ s}$) e pause di punteggiatura.
 - **Preset Sottotitoli**: Memorizzati nella tabella `subtitle_presets`, archiviano famiglia font (`Montserrat Black`, `Anton`), dimensione in pt, palette non-fluo (base e parola attiva), spessore contorno in px, raggio d'ombra e margine verticale Y Safe-Area.
 - **Caricamento Istantaneo**: Da qualsiasi schermata o riga della Coda Batch, l'utente seleziona il preset da un menu a tendina e tutti i controlli visivi/sonori si aggiornano all'istante, pronti per l'audizione demo (Max 5s) o per l'anteprima 9:16.
 
+#### 3. Persistenza Completa dello Stato Workspace su Disco (`session_state.json`)
+Oltre ai singoli preset, il file `app_data/session_state.json` memorizza istantaneamente lo stato esecutivo completo della MainWindow:
+- Script correntemente attivo nel workspace (titolo, testo completo, conteggio parole e caratteri, stato).
+- Parametri temporali personalizzati e chunking custom (`custom_chunks`, `custom_intros`, `custom_outros`, $T_{\max}$, $\Delta$, WPS).
+- Configurazioni correnti di Voce, Sottotitoli, Background Video Category e Mixing BGM.
+- Al riavvio dell'applicazione (`_restore_session_or_start_fresh()`): se una sessione precedente non era stata completata con un render definitivo, l'intero ambiente di lavoro viene ripristinato esattamente allo stato precedente, azzerando qualsiasi rischio di perdita dati; se invece l'ultimo render era stato concluso con successo, l'app si avvia con workspace pulito ma conserva i preset preferiti.
 
 ---
 
-### 5.13. Finestra Modale di Riepilogo Pre-Render & Ispezione Frame 0.6s (PreProductionReviewModal)
+### 5.14. Finestra Modale di Riepilogo Pre-Render & Ispezione Frame 1.1s (PreProductionReviewModal)
 
 La finestra modale **`PreProductionReviewModal`** rappresenta l'ultimo checkpoint visivo e analitico prima di avviare il processo di rendering irreversibile. Si apre automaticamente quando l'utente clicca su `[ 🚀 PROCEDI ALLA CREAZIONE DEI CONTENUTI ]` (dalla schermata principale per una singola storia) oppure su `[ 🚀 AVVIA PRODUZIONE BATCH ]` (dalla Coda di Produzione Multi-Storia).
 
 #### 1. Obiettivi e Filosofia UX del Checkpoint
 1. **Verifica "Uno a Uno" Sequenziale**: Per ogni storia inclusa nella sessione di creazione (singola o batch multi-storia), l'utente naviga attraverso un carosello ordinato `[ ◀ Precedente ] Storia X di N [ Successiva ▶ ]`.
 2. **Riepilogo Sintetico Esecutivo**: Presenta in una vista compatta tutte le scelte effettuate per quella specifica storia (testo, durata prevista, voce, vincoli di clip sequenziale monosorgente, traccia BGM e stile grafico).
-3. **Ispezione Reale del Primo Frame a 0.60 Secondi ($t = 0.60\text{ s}$) con Intro Title Banner**:
-   - **Razionale Matematico del Frame a 0.6s**: Poiché il video inizia con un anticipo di $0.50\text{ s}$ rispetto alla voce ($t = 0.0\text{ s} \to 0.50\text{ s}$ è puro video d'aggancio in cui è attivo il banner del titolo al centro), la voce e i sottotitoli dinamici si attivano esattamente a $t = 0.50\text{ s}$. Di conseguenza, il fotogramma a **$t = 0.60\text{ s}$** ($100\text{ ms}$ dopo l'inizio della prima parola) è il **primo istante esatto in cui compaiono a video simultaneamente**:
-     - **Al centro dello schermo**: l'**Intro Title Banner** `"[nome del testo] part.[clip_num]"` renderizzato con il font scelto per lo Short.
+3. **Ispezione Reale del Primo Frame a 1.10 Secondi ($t = 1.10\text{ s}$) con Sottotitolo Attivo**:
+   - **Razionale Matematico del Frame a 1.10s**: Poiché il video inizia con un anticipo esatto di $1.00\text{ s}$ rispetto alla voce ($t = 0.0\text{ s} \to 1.00\text{ s}$ è puro video d'aggancio durante il quale è visibile l'Intro Title Banner al centro), la voce e i sottotitoli dinamici si attivano esattamente a $t = 1.00\text{ s}$. Di conseguenza, il fotogramma a **$t = 1.10\text{ s}$** ($100\text{ ms}$ dopo l'inizio della prima parola parlata) è il **primo istante esatto in cui compaiono a video simultaneamente**:
      - **In basso nella Safe Zone**: la **prima parola parlata attiva** illuminata con il colore di highlight configurato (`#BFA175` Sabbia Dorata).
-   - Il motore FFmpeg genera al volo l'immagine composita reale (`review_frame_0_6s.jpg`): fotogramma reale della clip video assegnata con impressi sopra il banner centrale e i sottotitoli ASS con font, colori, contorni e margini Safe-Zone configurati.
-   - L'utente può verificare prima del rendering definitivo sia il titolo al centro sia la leggibilità dei sottotitoli e il contrasto sui colori del video di background all'interno delle Safe Zones di TikTok, Reels e Shorts.
+     - **Sullo sfondo**: il fotogramma reale estratto dal video assegnato, consentendo di verificare contrasto cromatico, leggibilità e conformità alle Safe Zones.
+   - Il motore FFmpeg genera al volo l'immagine composita reale (`review_frame_1_1s.jpg`): fotogramma reale della clip video assegnata con impressi sopra i sottotitoli ASS con font, colori, contorni e margini Safe-Zone configurati.
+   - L'utente può verificare prima del rendering definitivo sia la leggibilità dei sottotitoli e il contrasto sui colori del video di background all'interno delle Safe Zones di TikTok, Reels e Shorts.
 4. **Protezione dalle Modifiche Irreversibili**: Fino a quando l'utente non preme `[ 🚀 CONFERMA & AVVIA CREAZIONE DEFINITIVA ]`, le clip video nel Video Pool **non vengono scalate** e lo script **non viene marcato come `UTILIZZATO`**. Se qualcosa non convince, l'utente clicca su `[ ✏️ Modifica / Torna Indietro ]` per ritoccare le impostazioni senza alcun impatto sullo stato del sistema.
 
 ---
@@ -782,49 +954,49 @@ La finestra modale **`PreProductionReviewModal`** rappresenta l'ultimo checkpoin
 
 ```
 +--------------------------------------------------------------------------------------------------------------------+
-| [X]  RIEPILOGO PRE-PRODUZIONE & ISPEZIONE VISIVA PRIMO FRAME (0.6s)                               [ Auto-Save: ON 🟢 ]|
+| [X]  RIEPILOGO PRE-PRODUZIONE & ISPEZIONE VISIVA PRIMO FRAME (1.1s)                               [ Auto-Save: ON 🟢 ]|
 |--------------------------------------------------------------------------------------------------------------------|
 |  NAVIGAZIONE CODA:  [ ◀ STORIA PRECEDENTE ]        STORIA 1 DI 4: Space_BlackHoles_EventHorizon       [ STORIA SUCCESSIVA ▶ ] |
 |--------------------------------------------------------------------------------------------------------------------|
 |                                                          |                                                         |
 |  COLONNA SINISTRA: RIEPILOGO SINTETICO IMPOSTAZIONI       |  COLONNA DESTRA: ISPEZIONE PRIMO FRAME SOTTOTITOLI      |
-|                                                          |  (Fotogramma Esatto a t = 0.60s sul Video Assegnato)    |
+|                                                          |  (Fotogramma Esatto a t = 1.10s sul Video Assegnato)    |
 |  +----------------------------------------------------+  |                                                         |
-|  | 📝 SCRIPT & METRICHE DURATA                         |  |  [ Monitor Smartphone 9:16 - Frame a 00:00:00.600 ]     |
+|  | 📝 SCRIPT & METRICHE DURATA                         |  |  [ Monitor Smartphone 9:16 - Frame a 00:00:01.100 ]     |
 |  |  • Titolo Contesto: Space_BlackHoles_EventHorizon    |  |  +---------------------------------------------------+  |
 |  |  • Parole: 104  |  Caratteri: 582                   |  |  | [   Area Superiore Safe Zone (Ricerca)   ]        |  |
 |  |  • Durata Voce Prevista: 36.4 s (Max: 43.0s)  ✅    |  |  |                                                   |  |
-|  |  • Durata Video Totale: 38.4 s (+2.0s Padding)  ✅ |  |  |           [ INTRO TITLE BANNER ]               |  |
-|  |    (0.5s Intro + 1.5s Outro esteso)                 |  |  |       "Space_BlackHoles part.1"               |  |
-|  +----------------------------------------------------+  |  |       (Centro Schermo - Stesso Font)          |  |
+|  |  • Durata Video Totale: 39.4 s (+3.0s Pad/Pausa) ✅ |  |  |                  [ IMMAGINE REALE                 |  |
+|  |    (1.0s Intro + 1.0s Pausa Outro + 1.0s Outro Pad) |  |  |                   DELLA CLIP VIDEO                |  |
+|  +----------------------------------------------------+  |  |                     ASSEGNATA                     |  |
+|                                                          |  |                 Minecraft_Parkour_01]             |  |
+|  +----------------------------------------------------+  |  |                                                   |  |
+|  | 🎙️ CONFIGURAZIONE VOCE & RECITAZIONE               |  |  |         ---------------------------------         |  |
+|  |  • Profilo Vocale: Ryan (American English Male)    |  |  |         |  [ DISCOVER ] THIS STORY      |  <--    |  |
+|  |  • Modalità: Custom Voice en-US                    |  |  |         ---------------------------------         |  |
+|  |  • Guida Emotiva (Instruct): "Viral Hook & Mystery"|  |  |          Parola Attiva: #BFA175 (Sabbia Dorata)   |  |
+|  |  • Cadenza / Velocità: 1.05x  |  Pitch: +0.0        |  |  |          Testo Base:    #DCE0EA (Perla Morbido)   |  |
+|  +----------------------------------------------------+  |  |          Bordo/Ombra:   #181A20 (Bordo 5px)       |  |
 |                                                          |  |                                                   |  |
-|  +----------------------------------------------------+  |  |                  [ IMMAGINE REALE                 |  |
-|  | 🎙️ CONFIGURAZIONE VOCE & RECITAZIONE               |  |  |                   DELLA CLIP VIDEO                |  |
-|  |  • Profilo Vocale: Ryan (American English Male)    |  |  |                     ASSEGNATA                     |  |
-|  |  • Modalità: Custom Voice en-US                    |  |  |                 Minecraft_Parkour_01]             |  |
-|  |  • Guida Emotiva (Instruct): "Viral Hook & Mystery"|  |  |                                                   |  |
-|  |  • Cadenza / Velocità: 1.05x  |  Pitch: +0.0        |  |  |                                                   |  |
-|  +----------------------------------------------------+  |  |         ---------------------------------         |  |
-|                                                          |  |         |  [ DISCOVER ] THIS STORY      |  <--    |  |
-|  +----------------------------------------------------+  |  |         ---------------------------------         |  |
-|  | 🎬 VIDEO ASSEGNATO & ALLOCAZIONE REGISTRY          |  |  |          Parola Attiva: #BFA175 (Sabbia Dorata)   |  |
-|  |  • File Sorgente: Minecraft_Parkour_01.mp4         |  |  |          Testo Base:    #DCE0EA (Perla Morbido)   |  |
-|  |  • Segmento Video: 00:00.0 -> 00:38.4 (Snapping)   |  |  |          Bordo/Ombra:   #181A20 (Bordo 5px)       |  |
-|  |  • Vincolo Sequenziale: Monosorgente Garantito ✅   |  |  |                                                   |  |
 |  +----------------------------------------------------+  |  |  | Area Profilo, Like, Commenti TikTok (Coperta) |  |  |
-|                                                          |  |  +---------------------------------------------------+  |
-|  +----------------------------------------------------+  |  |  CTA FINALE CONFIGURATA (a t = 37.4s -> 38.4s):       |  |
-|  | 🏷️ BANNER INTRO & OUTRO CTA (STESSO FONT)          |  |  |  "Subscribe for part.2" (Centro Schermo)             |  |
-|  |  • Intro (0.0s-1.5s): "Space_BlackHoles part.1"    |  |  +---------------------------------------------------+  |
-|  |  • Outro CTA (-1.0s): "Subscribe for part.2"       |  |                                                         |
-|  |  • Stacco Voce: a -1.5s dalla fine del video       |  |  CONTROLLI DI VERIFICA GRAFICA:                         |
-|  +----------------------------------------------------+  |  [X] Mostra Overlay Safe Zones Social (TikTok/IG/Shorts)|
-|                                                          |  Timestamp Esatto: 00:00:00.600 (+0.10s su inizio voce) |
+|  | 🎬 VIDEO ASSEGNATO & ALLOCAZIONE REGISTRY          |  |  +---------------------------------------------------+  |
+|  |  • File Sorgente: Minecraft_Parkour_01.mp4         |  |  CTA FINALE CONFIGURATA (Attacco con Voce TTS a -1.0s):  |  |
+|  |  • Segmento Video: 00:00.0 -> 00:39.4 (Snapping)   |  |  "Follow for part.2" (Centro Schermo)                   |  |
+|  |  • Vincolo Sequenziale: Monosorgente Garantito ✅   |  |  +---------------------------------------------------+  |
 |  +----------------------------------------------------+  |                                                         |
-|  | 🎵 COLONNA SONORA (BGM) DA YOUTUBE                 |  |  STATO AUDIT FATTIBILITÀ:                               |
-|  |  • Brano: Lofi_Chill_Atmosphere_Night (YouTube)    |  |  Materiale Video Disponibile:  COMPLETO (100%) 🟢       |
-|  |  • Target Loudness: -24.0 LUFS (EBU R128)          |  |  Conflitti Monosorgente:       NESSUNO ✅               |
-|  |  • Auto-Ducking: Attivo (-22 dB voce, -14 dB outro)|  |  Allocazione Coda:             4 Storie / 4 Clip        |
+|                                                          |  CONTROLLI DI VERIFICA GRAFICA:                         |
+|  +----------------------------------------------------+  |  [X] Mostra Overlay Safe Zones Social (TikTok/IG/Shorts)|
+|  | 🏷️ BANNER INTRO & OUTRO CTA (STESSO FONT)          |  |  Timestamp Esatto: 00:00:01.100 (+0.10s su inizio voce) |
+|  |  • Intro (0.0s-1.0s): "Space_BlackHoles part.1"    |  |                                                         |
+|  |  • Outro CTA (-1.0s): "Follow for part.2"          |  |  STATO AUDIT FATTIBILITÀ:                               |
+|  |  • Outro Vocale TTS : Parlata con pausa 1.0s       |  |  Materiale Video Disponibile:  COMPLETO (100%) 🟢       |
+|  +----------------------------------------------------+  |  Conflitti Monosorgente:       NESSUNO ✅               |
+|                                                          |  Allocazione Coda:             4 Storie / 4 Clip        |
+|  +----------------------------------------------------+  |                                                         |
+|  | 🎵 COLONNA SONORA (BGM) DA YOUTUBE                 |  |                                                         |
+|  |  • Brano: Lofi_Chill_Atmosphere_Night (YouTube)    |  |                                                         |
+|  |  • Target Loudness: -24.0 LUFS (EBU R128)          |  |                                                         |
+|  |  • Auto-Ducking: Attivo (-22 dB voce, -14 dB outro)|  |                                                         |
 |  +----------------------------------------------------+  |                                                         |
 |                                                          |                                                         |
 |  +----------------------------------------------------+  |                                                         |
@@ -847,14 +1019,14 @@ La finestra modale **`PreProductionReviewModal`** rappresenta l'ultimo checkpoin
 - **Titolo Finestra**: Stile soft dark con badge di stato e indicatore di auto-save.
 - **Pulsanti di Scorrimento (`[ ◀ Precedente ]` e `[ Successiva ▶ ]`)**:
   - Permettono di passare fluidamente da una storia all'altra della coda.
-  - Al cambio di pagina, sia la colonna di sinistra (metadati e configurazioni) che il monitor 9:16 di destra (frame a 0.6s) si aggiornano istantaneamente ($< 50\text{ ms}$).
+  - Al cambio di pagina, sia la colonna di sinistra (metadati e configurazioni) che il monitor 9:16 di destra (frame a 1.1s) si aggiornano istantaneamente ($< 50\text{ ms}$).
   - Nel caso di produzione a storia singola, la barra di navigazione mostra l'etichetta `STORIA SINGOLA: [Titolo]` con i pulsanti di navigazione disabilitati con eleganza visiva.
 
 ##### B. Colonna Sinistra: Moduli di Riepilogo Sintetico
 Organizzata in card compatte con contorno delicato `#343946` e sfondo `#21242C`:
 1. **Card 1: Script & Metriche Temporali**:
    - Titolo semantico dello script e prime due righe di testo in anteprima.
-   - Conteggio parole e verifica conformità della durata ($T_{\text{audio}} \le 43.0\text{ s}$, $T_{\text{video}} = T_{\text{audio}} + 2.0\text{ s}$).
+   - Conteggio parole e verifica conformità della durata ($T_{\text{audio}} \le 43.0\text{ s}$, $T_{\text{video}} = T_{\text{audio}} + 3.0\text{ s}$ con pause).
 2. **Card 2: Voce Qwen3-TTS & Recitazione**:
    - Profilo vocale (`Ryan`, `Aiden`, clone vocale `.qvoice` o avatar `Voice Design`).
    - Prompt `instruct` emotivo, fattore di velocità WPM, intonazione e assenza di pause anomale.
@@ -862,22 +1034,22 @@ Organizzata in card compatte con contorno delicato `#343946` e sfondo `#21242C`:
    - Titolo del video sorgente e coordinate temporali assegnate dal Segment Registry.
    - Verifica di integrità del vincolo monosorgente sequenziale (nessuna contaminazione tra video differenti).
 4. **Card 4: Banner Intro & Outro CTA (Stesso Font dello Short)**:
-   - Visualizzazione del testo iniziale: `"[Titolo] part.[N]"` (attivo $0.0\text{s} \to 1.5\text{s}$ a centro schermo).
-   - Visualizzazione della Call-to-Action finale: `"Subscribe for part.[N+1]"` (o `"Subscribe for more!"` se ultima clip), attiva da $-1.0\text{s}$ fino a fine video con stacco vocale a $-1.5\text{s}$.
+   - Visualizzazione del testo iniziale: `"[Titolo] part.[N]"` (attivo $0.0\text{s} \to 1.0\text{s}$ a centro schermo).
+   - Visualizzazione della Call-to-Action finale: `"Follow for part.[N+1]"` (o `"Follow for more!"` se ultima clip), sincronizzata con la lettura dell'outro da parte del TTS dopo $1.0\text{s}$ di pausa.
 5. **Card 5: Colonna Sonora BGM**:
-   - Titolo brano convertito da YouTube, normalizzazione sonora EBU R128 a $-24\text{ LUFS}$ e parametri di ducking audio tri-fase (con volume a $-14\text{ dB}$ sull'outro esteso di $1.5\text{ s}$).
+   - Titolo brano convertito da YouTube, normalizzazione sonora EBU R128 a $-24\text{ LUFS}$ e parametri di ducking audio tri-fase (con volume a $-14\text{ dB}$ sull'outro).
 6. **Card 6: Tipografia Sottotitoli & Banner**:
    - Famiglia di font ereditata sia per i sottotitoli che per entrambi i banner centrati, dimensione in pt, stile di animazione (*Word Pop* o *Karaoke*), contorno protettivo e posizionamento Y.
 7. **Card 7: Thumbnail Seriale Coordinata (Same-Frame Branding)**:
-   - **Sfondo Identico per l'Intera Serie**: utilizza lo stesso fotogramma master campionato a $0.60\text{ s}$ per tutte le parti della storia.
+   - **Sfondo Identico per l'Intera Serie**: utilizza lo stesso fotogramma master campionato a $1.10\text{ s}$ per tutte le parti della storia.
    - **Titolazione a Due Righe**: Riga 1 `"[titolo storia]"` e Riga 2 `"part.[numero clip]"` con font uniforme.
    - File generato: `app_data/renders/[titolo]_part[N]_thumb.jpg` (1080x1920 nativo).
 
-##### C. Colonna Destra: Monitor 9:16 & Toggle Ispezione [ Frame 0.60s | Thumbnail Serie ]
+##### C. Colonna Destra: Monitor 9:16 & Toggle Ispezione [ Frame 1.10s | Thumbnail Serie ]
 - **Monitor Formato 9:16**: Rapporto d'aspetto nativo smartphone (1080x1920 scalato proporzionalmente a 270x480 nella GUI).
-- **Selettore Tab di Ispezione**: `[ 📺 Video Frame 0.60s ]`  |  `[ 🖼️ Thumbnail Short ]`:
-  1. **Vista Video Frame ($t = 0.60\text{ s}$)**:
-     - Mostra il fotogramma campionato dalla clip con impresso sia l'**Intro Title Banner centrato** sia la prima parola parlata attiva in basso con colore di evidenziazione (`#BFA175` Sabbia Dorata).
+- **Selettore Tab di Ispezione**: `[ 📺 Video Frame 1.10s ]`  |  `[ 🖼️ Thumbnail Short ]`:
+  1. **Vista Video Frame ($t = 1.10\text{ s}$)**:
+     - Mostra il fotogramma campionato dalla clip ($+100\text{ms}$ dopo l'inizio del parlato) con impressa la prima parola parlata attiva in basso con colore di evidenziazione (`#BFA175` Sabbia Dorata).
   2. **Vista Thumbnail Serie**:
      - Visualizza in tempo reale la copertina ufficiale ad alta risoluzione:
        - Sfondo: **lo stesso fotogramma master per tutte le parti della storia**.
@@ -898,10 +1070,9 @@ Organizzata in card compatte con contorno delicato `#343946` e sfondo `#21242C`:
   - Esegue la transizione di stato dello script da `DISPONIBILE` a `UTILIZZATO` con marcatura oraria irreversibile.
   - Chiude la modale e porta il focus sul `MONITOR ATTIVITÀ MULTI-TASK CONCORRENTI` della Finestra Principale per seguire l'avanzamento del render al 60 FPS senza bloccare la GUI.
 
-
 ---
 
-### 5.14. Finestra di Avanzamento Lavori Professionale & Gestione Annullamento Atomico (ProductionProgressDialog)
+### 5.15. Finestra di Avanzamento Lavori Professionale & Gestione Annullamento Atomico (ProductionProgressDialog)
 
 Quando l'utente conferma la produzione (singola o batch multi-storia) nella finestra di riepilogo pre-render, l'applicazione visualizza la finestra di avanzamento **`ProductionProgressDialog`**.
 
@@ -1252,29 +1423,38 @@ QProgressBar::chunk {
 1. **Popolamento Preventivo (Opzionale)**:
    - L'utente apre la modale *"➕ Nuovo Script"*, incolla una storia e clicca *"Salva nell'Archivio"*.
    - Il sistema convalida che non sia un duplicato tramite l'algoritmo $O(1)$, genera il nome di contesto semantico (es. `Space_BlackHoles_EventHorizon`) e la memorizza come `DISPONIBILE`. L'operazione può essere ripetuta per decine di storie.
-2. **Selezione Script per il Video**:
-   - Dalla finestra principale, l'utente clicca *"📂 Scegli dall'Archivio"* e seleziona lo script desiderato.
-   - Lo script viene caricato nel Modulo 1 mostrando il titolo di contesto e le metriche di durata stimata.
-3. **Configurazione Voce (Custom, Clone o Voice Design)**:
+2. **Selezione Script per il Video & Ripristino Sessione Automatica**:
+   - Dalla finestra principale, l'utente clicca *"📂 Scegli dall'Archivio"* e seleziona lo script desiderato (oppure riprende istantaneamente il lavoro grazie al ripristino automatico dello stato da `app_data/session_state.json` all'avvio dell'applicazione).
+   - Lo script viene caricato nel Modulo 1 mostrando il titolo di contesto semantico, i bottoni di controllo clip e le metriche sincronizzate di parole e durata stimata.
+3. **Analisi, Suddivisione Clip & Personalizzazione Intro/Outro (`ClipSplitAnalysisModal`)**:
+   - Dalla home card, l'utente clicca `[ ✂️ Suddivisione Clip & Parametri ]` (o `[ ✂️ Dettaglio Clip ]`) per calibrare e supervisionare la divisione del testo.
+   - **Interfaccia Esecutiva a Due Pannelli**:
+     - *Pannello Sinistro (Overview Globale 38%)*: visualizza le metriche aggregate della storia ($N$ clip, durata totale, WPM dinamico) e un sommario compatto di ogni clip con badge di conformità temporale ($\le 60\text{ s}$).
+     - *Pannello Destro (Editor Card & Modifica Testuale 62%)*: schede dettagliate per ogni singola clip (con editor $\ge 6$ linee, conteggio parole e durata in tempo reale) dotate di controlli per spostare sezioni di testo verso la clip precedente o successiva (`[ ⬆️ Sposta su ]` / `[ ⬇️ Sposta giù ]`), unire o dividere clip, perfezionando i punti di hook o di cliffhanger narrativo.
+   - **Dialogo Intro / Outro (`IntroOutroEditDialog`)**:
+     - Accessibile da ogni card (`[ ✂️ Modifica Intro / Outro ]` o doppio clic). Consente di impostare testi personalizzati con supporto al placeholder dinamico `{next_part}` (es. default parlato: `"Follow for part {next_part}."` / `"Follow for more."`; banner: `"Follow for part.{next_part}"` / `"Follow for more!"`).
+     - **Avviso Visivo Outro Asimmetrico**: Se l'utente imposta un outro personalizzato su una clip intermedia, l'interfaccia evidenzia chiaramente in rosso l'avviso informativo: *"⚠️ L'outro sarà aggiunto solo all'ultimo video"* per evitare ambiguità operative.
+     - **Salvataggio Continuo & Preset**: Le modifiche di ogni clip si salvano istantaneamente senza dover confermare pulsanti aggiuntivi (`auto-save per clip`), con possibilità di propagare le impostazioni a tutto il progetto corrente (`[ Applica a tutto il progetto ]`) o salvarle come preset globale permanente.
+4. **Configurazione Voce (Custom, Clone o Voice Design) & VAD Stitching**:
    - L'utente seleziona un profilo vocale già memorizzato (es. la propria voce clonata `.qvoice` o un avatar sintetico disegnato a parole) oppure seleziona uno speaker predefinito.
    - Sceglie l'istruzione emotiva `instruct` (*Viral Hook*, *Mistero*, ecc.) e testa la resa in streaming sub-100ms.
-4. **Selezione o Download Video Background (Flusso Continuo & Monosorgente)**:
+   - La voce narrante e l'outro parlato sintetizzato con Qwen3-TTS vengono uniti via pipeline di stitching audio (`stitch_narration_and_outro`), che elimina code e respiri spuri tramite Silero VAD (con finestra di persistenza energetica a 4 frame da 20ms = 80ms contro falsi tagli da click impulsivi) ed inserisce una pausa naturale esatta di $1.000\text{ s}$ (`OUTRO_PAUSE_SEC = 1.000`) tra la fine della storia e la call-to-action parlata.
+5. **Selezione o Download Video Background (Flusso Continuo & Monosorgente)**:
    - L'utente seleziona un video dal Video Pool (oppure apre `[ ➕ Scarica Video YT ]` per accodare più link YouTube in successione con conform 9:16 e autenticazione Firefox / `cookies.txt`).
-   - **Verifica Vincolo Monosorgente Continuo**: Il solver verifica che il video selezionato possieda una durata continua contigua sufficiente a coprire l'intero fabbisogno della storia ($T_{\text{storia}}$). Tutti gli Short della storia devono provenire dallo stesso identico video master in sequenza continua.
+   - **Verifica Vincolo Monosorgente Continuo**: Il solver verifica che il video selezionato possieda una durata continua contigua sufficiente a coprire l'intero fabbisogno della storia ($T_{\text{storia}}$), includendo il lead-in iniziale fisso di $1.000\text{ s}$ (`PADDING_INTRO_SEC = 1.000`) e il lead-out finale fisso di $1.000\text{ s}$ (`PADDING_OUTRO_SEC = 1.000`). Tutti gli Short della storia devono provenire dallo stesso identico video master in sequenza continua.
    - **Caso di Durata Continua Insufficiente**: Il sistema blocca il mix di video diversi e alloca un nuovo video master continuo. La storia partirà dal secondo `00:00.0` del nuovo video. I secondi residui del video precedente **non vengono buttati via subito**: restano nel pool per future storie brevi compatibili (o vengono riutilizzati tramite la Free-List).
    - **Garbage Collection Automatica ($1\text{m } 30\text{s} +20\text{s}/-\infty \implies \le 110.0\text{ s}$)**: Se al termine delle produzioni il residuo finale di un master scende a $\le 1\text{m } 50\text{s}$ ($110\text{ s}$), il file master viene eliminato automaticamente da disco liberando spazio e marcato come epurato.
-   - La voce viene sintetizzata con Qwen3-TTS ($\le 43.0\text{ s}$).
-5. **Configurazione Musica di Sottofondo (BGM) & Sottotitoli**:
+6. **Configurazione Musica di Sottofondo (BGM) & Sottotitoli**:
    - Ingestion automatica della traccia YouTube o selezione da libreria Safe CC0 / Royalty-Free (o modalità raccomandata `Nessuna Musica` per trend social) con normalizzazione a $-24.0\text{ LUFS}$ e ducking con rampe morbide ($150\text{ms}$ attack, $300\text{ms}$ release, $-22\text{ dB}$ voce, $-14\text{ dB}$ intro/outro).
-   - Scelta del preset font, animazione parola per parola, Intro Title Banner centrato a $0.0\text{s} \to 1.5\text{s}$, Outro CTA Banner centrato da $-1.0\text{s}$ a fine video con stacco voce a $-1.5\text{s}$, e allineamento Safe Zones.
-6. **Finestra Modale di Riepilogo Pre-Render & Ispezione Visiva Frame 0.6s (`PreProductionReviewModal`)**:
+   - Scelta del preset font, animazione parola per parola, Intro Title Banner centrato visibile da $0.0\text{s} \to 1.0\text{s}$ (`INTRO_BANNER_END_SEC = 1.000`, scompare non appena attacca la voce narrante), Outro CTA Banner sincronizzato temporalmente con l'inizio dell'outro parlato letto dal TTS dopo $1.0\text{s}$ di pausa naturale, testi dinamici conformi ai template (`"Follow for part.{next_part}"` / `"Follow for more!"`), e allineamento Safe Zones TikTok/Reels/Shorts.
+7. **Finestra Modale di Riepilogo Pre-Render & Ispezione Visiva Frame 1.1s (`PreProductionReviewModal`)**:
    - Al clic su `[ 🚀 PROCEDI ALLA CREAZIONE DEI CONTENUTI ]` (o `[ 🚀 AVVIA PRODUZIONE BATCH ]`), il rendering **non parte alla cieca**.
    - Si apre la finestra di riepilogo in cui l'utente ispeziona **uno a uno** ogni video da produrre tramite carosello `[ ◀ Precedente ] Storia X di N [ Successiva ▶ ]`.
    - Vengono mostrati: riepilogo sintetico di script, durata, voce, segmento video continuo assegnato monosorgente, BGM e font.
-   - **Ispezione Visiva Frame 0.6s**: Viene mostrato il primo fotogramma esatto in cui compaiono i sottotitoli a video ($t = 0.60\text{ s}$, corrispondente a $+0.10\text{ s}$ dall'inizio della voce) con il Title Banner centrato e la prima parola karaoke attiva impressa sopra il video reale di background, per verificare a colpo d'occhio leggibilità, contrasto cromatico e posizionamento Safe-Area.
+   - **Ispezione Visiva Frame 1.1s (`REVIEW_FRAME_TIMESTAMP_SEC = 1.100`)**: Viene mostrato il primo fotogramma esatto in cui compaiono i sottotitoli a video ($t = 1.100\text{ s}$, corrispondente esattamente a $+0.100\text{ s}$ dall'inizio della voce narrante al secondo $1.000$) con l'Intro Title Banner appena scomparso e la prima parola karaoke attiva impressa nitidamente sopra il video reale di background, per verificare a colpo d'occhio leggibilità, contrasto cromatico e posizionamento Safe-Area.
    - **Thumbnail Coordinata Serie**: Ispezione della copertina ufficiale generata con lo stesso frame di sfondo per tutte le parti della storia, titolazione su due righe e font coordinato.
    - L'utente può cliccare `[ ✏️ Modifica / Torna Indietro ]` per cambiare qualsiasi parametro a costo zero, oppure dare il via definitivo con `[ 🚀 CONFERMA & AVVIA CREAZIONE DEFINITIVA ]`.
-7. **Avanzamento Lavori Professionale (`ProductionProgressDialog`) & Gestione Annullamento in Qualsiasi Momento**:
+8. **Avanzamento Lavori Professionale (`ProductionProgressDialog`) & Gestione Annullamento in Qualsiasi Momento**:
    - Al via libera definitivo, si apre la finestra di avanzamento executive con stepper visivo delle 4 fasi per ogni storia, indicatori percentuali chiari ed ETA.
    - **Possibilità di Cancellazione Istantanea**: In qualsiasi momento, l'utente può premere `[ 🛑 INTERROMPI CREAZIONE ]` o rimuovere singoli testi con `[ ✕ Rimuovi dalla Coda ]` / `[ ⏹️ Salta / Annulla ]`.
    - **Rollback Atomico & Integrità delle Risorse (Regola per Intero Testo)**:

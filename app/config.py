@@ -34,6 +34,9 @@ _bin_str = str(BIN_DIR.resolve())
 if _bin_str not in os.environ.get("PATH", ""):
     os.environ["PATH"] = _bin_str + os.pathsep + os.environ.get("PATH", "")
 
+# Assicura configurazione allocatore di memoria PyTorch per prevenire frammentazione VRAM
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 # Assicura caricamento librerie CUDA (cublas64_12.dll per faster-whisper e CTranslate2)
 try:
     import torch
@@ -149,13 +152,93 @@ TRUE_PEAK_LIMITER_DB = -1.0
 VRAM_MAX_CEILING_MB = 4000.0       # Tetto massimo totale scheda GPU
 VRAM_WINDOWS_DWM_MB = 1200.0       # Riserva DWM Windows 11 + PySide6
 VRAM_APP_NET_BUDGET_MB = 2800.0    # Budget netto applicazione: 2.800 MB (2,8 GB)
-CUDA_PER_PROCESS_MEMORY_FRACTION = 0.70 # Cap allocatore PyTorch 70% su 8GB (5.6 GB max) per modello neurale Qwen3-TTS (3.89 GB) lasciando >2.4 GB a DWM
+CUDA_PER_PROCESS_MEMORY_FRACTION = 0.85 # Cap allocatore PyTorch 85% su 8GB (6.8 GB max) per modello neurale Qwen3-TTS (3.9 GB) e buffer transitori
 
-# --- SPEAKER DEFAULT & PRESET QWEN3-TTS (en-US) ---
+# --- SPEAKER DEFAULT & PRESET QWEN3-TTS (en-US & Multilingual) ---
 DEFAULT_SPEAKER = "Ryan"           # American Natural Warm Male
 DEFAULT_FEMALE_SPEAKER = "Vivian"  # American Warm Female
 DEFAULT_NARRATOR_SPEAKER = "Aiden" # Dynamic Young US Narrator
 DEFAULT_INSTRUCT = "High energy viral creator voice, fast paced, emphasizing keywords"
+
+# Elenco completo delle 9 voci supportate di default da Qwen3-TTS (CustomVoice)
+QWEN_DEFAULT_VOICES = [
+    {
+        "id": "ryan",
+        "name": "Ryan",
+        "display": "Ryan (Dynamic Warm Male - American Accent)",
+        "gender": "male",
+        "accent": "en-US",
+        "description": "Dynamic American Warm Male, strong rhythmic drive"
+    },
+    {
+        "id": "aiden",
+        "name": "Aiden",
+        "display": "Aiden (Dynamic Young US Narrator)",
+        "gender": "male",
+        "accent": "en-US",
+        "description": "Sunny American Male, clear midrange, enthusiastic"
+    },
+    {
+        "id": "vivian",
+        "name": "Vivian",
+        "display": "Vivian (Warm Female - American Accent)",
+        "gender": "female",
+        "accent": "en-US",
+        "description": "Bright, cute and confident young female"
+    },
+    {
+        "id": "serena",
+        "name": "Serena",
+        "display": "Serena (Expressive Narrator - American Accent)",
+        "gender": "female",
+        "accent": "en-US",
+        "description": "Warm, gentle and expressive female narrator"
+    },
+    {
+        "id": "dylan",
+        "name": "Dylan",
+        "display": "Dylan (Youthful Male - Natural Timbre)",
+        "gender": "male",
+        "accent": "Multilingual",
+        "description": "Youthful natural male voice, clear natural timbre"
+    },
+    {
+        "id": "eric",
+        "name": "Eric",
+        "display": "Eric (Lively Male - Bright Timbre)",
+        "gender": "male",
+        "accent": "Multilingual",
+        "description": "Lively and energetic male voice, bright timbre"
+    },
+    {
+        "id": "ono_anna",
+        "name": "Ono_Anna",
+        "display": "Ono_Anna (Playful Light Female)",
+        "gender": "female",
+        "accent": "Multilingual",
+        "description": "Playful, light and nimble female voice"
+    },
+    {
+        "id": "sohee",
+        "name": "Sohee",
+        "display": "Sohee (Warm Emotional Female)",
+        "gender": "female",
+        "accent": "Multilingual",
+        "description": "Warm emotional female voice, rich expressive nuance"
+    },
+    {
+        "id": "uncle_fu",
+        "name": "Uncle_Fu",
+        "display": "Uncle_Fu (Seasoned Mellow Male - Low Timbre)",
+        "gender": "male",
+        "accent": "Multilingual",
+        "description": "Seasoned mature male voice, low mellow timbre"
+    },
+]
+
+QWEN_SUPPORTED_SPEAKER_IDS = {v["id"] for v in QWEN_DEFAULT_VOICES}
+QWEN_SPEAKER_NAMES = [v["name"] for v in QWEN_DEFAULT_VOICES]
+QWEN_SPEAKER_DISPLAY_MAP = {v["name"]: v["display"] for v in QWEN_DEFAULT_VOICES}
 
 # --- COMPATIBILITY ALIASES ---
 MIN_SHORT_DURATION_SEC = MIN_REEL_VIDEO_SEC

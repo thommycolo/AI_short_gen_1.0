@@ -38,5 +38,66 @@
     "speed_rate": 1.00,
     "pitch": 0.5,
     "temperature": 0.75
+  },
+  {
+    "preset_name": "US_Story_Serena",
+    "language": "English",
+    "speaker_or_profile": "Serena",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Warm gentle storyteller voice, expressive and captivating",
+    "speed_rate": 1.00,
+    "pitch": 0.0,
+    "temperature": 0.70
+  },
+  {
+    "preset_name": "Youth_Dylan_Fast",
+    "language": "English",
+    "speaker_or_profile": "Dylan",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Youthful energetic pacing, punchy delivery for viral clips",
+    "speed_rate": 1.05,
+    "pitch": 0.0,
+    "temperature": 0.72
+  },
+  {
+    "preset_name": "Action_Eric_Lively",
+    "language": "English",
+    "speaker_or_profile": "Eric",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Lively, bright and urgent narration for fast-paced action",
+    "speed_rate": 1.10,
+    "pitch": 0.0,
+    "temperature": 0.75
+  },
+  {
+    "preset_name": "Playful_OnoAnna",
+    "language": "English",
+    "speaker_or_profile": "Ono_Anna",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Playful, bright and lighthearted tone, nimble and cheerful",
+    "speed_rate": 1.00,
+    "pitch": 1.0,
+    "temperature": 0.75
+  },
+  {
+    "preset_name": "Emotional_Sohee",
+    "language": "English",
+    "speaker_or_profile": "Sohee",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Deeply emotional, warm and empathetic narration with nuanced dynamics",
+    "speed_rate": 0.95,
+    "pitch": 0.0,
+    "temperature": 0.68
+  },
+  {
+    "preset_name": "DeepTrailer_UncleFu",
+    "language": "English",
+    "speaker_or_profile": "Uncle_Fu",
+    "voice_type": "CUSTOM",
+    "instruct_prompt": "Ultra deep, seasoned cinematic narrator, solemn and authoritative",
+    "speed_rate": 0.90,
+    "pitch": -2.0,
+    "temperature": 0.60
   }
 ]
+
