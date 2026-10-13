@@ -490,6 +490,7 @@ class SubtitleDrawer(QDialog):
         script_data: Optional[dict] = None,
         timing_config: Optional[dict] = None,
         video_file_path: Optional[str] = None,
+        script_repo: Optional[Any] = None,
         parent: Optional[QWidget] = None
     ):
         super().__init__(parent)
@@ -497,9 +498,17 @@ class SubtitleDrawer(QDialog):
         self.current_settings = copy.deepcopy(current_settings or {})
         self.video_pool_mgr = video_pool_mgr
         self.temp_frame_path = video_frame_path or ""
-        self.script_data = script_data or {}
-        self.timing_config = timing_config or {}
+        self.script_data = copy.deepcopy(script_data or {})
+        self.timing_config = copy.deepcopy(timing_config or {})
         self.video_file_path = video_file_path or ""
+        self.script_repo = script_repo
+        self.available_scripts = []
+        if self.script_repo:
+            try:
+                self.available_scripts = self.script_repo.get_scripts() or []
+            except Exception as e:
+                log.warning(f"Errore lettura script_repo: {e}")
+                self.available_scripts = []
 
         # Appunti interni per funzione Copia/Incolla Specifiche
         self.copied_specs_clipboard: Optional[dict] = None
@@ -518,6 +527,8 @@ class SubtitleDrawer(QDialog):
         self.frame_scrub_timer.timeout.connect(self._on_scrub_timer_timeout)
 
         self._init_ui()
+        self._populate_story_selector()
+        self._populate_clip_selector()
         self._load_available_fonts()
         self._load_presets_combo()
         self._load_clip_data_to_ui(self.current_clip_idx)
@@ -525,14 +536,34 @@ class SubtitleDrawer(QDialog):
 
     def _init_clips_model(self):
         """Inizializza la lista delle clip generate dal testo attivo e la mappa delle impostazioni indipendenti."""
+        if not self.script_data and self.available_scripts:
+            self.script_data = copy.deepcopy(self.available_scripts[0])
+
         custom_chunks = self.timing_config.get("custom_chunks") or self.script_data.get("custom_chunks") or []
         raw_text = self.script_data.get("raw_text") or self.script_data.get("full_text", "")
         title = self.script_data.get("context_title", "Short Story")
 
-        if not custom_chunks and raw_text:
-            custom_chunks = [raw_text]
+        # Se non ci sono chunks preesistenti o ce n'è solo 1 e il testo ha più parole, esegui il chunking coerente
+        if (not custom_chunks or len(custom_chunks) <= 1) and raw_text:
+            try:
+                from app.core.discourse_chunker import DiscourseCoherenceChunker
+                chunker = DiscourseCoherenceChunker()
+                chunks = chunker.chunk_story_coherently(raw_text)
+                if chunks and len(chunks) > 1:
+                    custom_chunks = chunks
+                elif not custom_chunks:
+                    custom_chunks = [raw_text]
+            except Exception as e_chunk:
+                log.warning(f"Errore chunking automatico: {e_chunk}")
+                if not custom_chunks:
+                    custom_chunks = [raw_text]
         elif not custom_chunks:
-            custom_chunks = ["Black holes are the most mysterious objects in the observable cosmos."]
+            custom_chunks = [
+                "Part 1: Black holes are the most mysterious objects in the observable cosmos, bending space and time.",
+                "Part 2: As you approach the event horizon, gravitational dilation causes time to slow down dramatically.",
+                "Part 3: Crossing the point of no return, nothing in the universe, not even light, can escape the singularity."
+            ]
+            title = "Cosmic Mysteries"
 
         self.clips: List[Dict[str, Any]] = []
         for i, chunk in enumerate(custom_chunks):
@@ -624,6 +655,18 @@ class SubtitleDrawer(QDialog):
         lbl_title = QLabel("DESIGNER SOTTOTITOLI & SAFE-ZONE STUDIO")
         lbl_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #DCE0EA;")
         header_bar.addWidget(lbl_title)
+        header_bar.addSpacing(16)
+
+        lbl_story = QLabel("📖 Storia:")
+        lbl_story.setStyleSheet("font-size: 12px; font-weight: 600; color: #949CAE;")
+        header_bar.addWidget(lbl_story)
+
+        self.cmb_story_selector = QComboBox()
+        self.cmb_story_selector.setMinimumWidth(260)
+        self.cmb_story_selector.setToolTip("Seleziona una storia dal database per visualizzare e personalizzare le sue clip")
+        self.cmb_story_selector.currentIndexChanged.connect(self._on_story_selected)
+        header_bar.addWidget(self.cmb_story_selector)
+
         header_bar.addStretch()
 
         lbl_autosave = QLabel("Auto-Save on Close: ON 🟢")
@@ -644,15 +687,26 @@ class SubtitleDrawer(QDialog):
         clip_nav_layout.addWidget(self.btn_prev_clip)
 
         self.lbl_clip_badge = QLabel("🎬 Clip 1 di 1")
-        self.lbl_clip_badge.setStyleSheet("font-size: 12px; font-weight: 700; color: #DCE0EA; padding: 0 6px;")
+        self.lbl_clip_badge.setStyleSheet("font-size: 12px; font-weight: 700; color: #DCE0EA; padding: 0 4px;")
         clip_nav_layout.addWidget(self.lbl_clip_badge)
+
+        self.cmb_clip_selector = QComboBox()
+        self.cmb_clip_selector.setMinimumWidth(240)
+        self.cmb_clip_selector.setToolTip("Seleziona direttamente la clip desiderata")
+        self.cmb_clip_selector.currentIndexChanged.connect(self._on_clip_combo_changed)
+        clip_nav_layout.addWidget(self.cmb_clip_selector)
 
         self.btn_next_clip = QPushButton("Clip Succ. ▶")
         self.btn_next_clip.setToolTip("Passa alla clip successiva di questo testo")
         self.btn_next_clip.clicked.connect(self._on_next_clip)
         clip_nav_layout.addWidget(self.btn_next_clip)
 
-        clip_nav_layout.addSpacing(16)
+        self.btn_add_clip = QPushButton("➕ Nuova Clip")
+        self.btn_add_clip.setToolTip("Aggiungi una nuova clip a questa storia")
+        self.btn_add_clip.clicked.connect(self._on_add_clip)
+        clip_nav_layout.addWidget(self.btn_add_clip)
+
+        clip_nav_layout.addSpacing(10)
 
         # Azioni di Editing Indipendente e Copia/Incolla Specifiche
         self.btn_copy_specs = QPushButton("📋 Copia Specifiche")
@@ -750,7 +804,6 @@ class SubtitleDrawer(QDialog):
         self.btn_view_outro.clicked.connect(lambda: self._set_preview_view_mode("OUTRO"))
 
         self.tab_settings.currentChanged.connect(self._on_tab_changed)
-        self.btn_view_outro.clicked.connect(lambda: self._set_preview_view_mode("OUTRO"))
 
         view_switcher_row.addWidget(self.btn_view_intro)
         view_switcher_row.addWidget(self.btn_view_sub)
@@ -1331,6 +1384,11 @@ class SubtitleDrawer(QDialog):
         self.btn_prev_clip.setEnabled(clip_idx > 0)
         self.btn_next_clip.setEnabled(clip_idx < total_clips - 1)
 
+        if hasattr(self, "cmb_clip_selector") and self.cmb_clip_selector.currentIndex() != clip_idx:
+            self.cmb_clip_selector.blockSignals(True)
+            self.cmb_clip_selector.setCurrentIndex(clip_idx)
+            self.cmb_clip_selector.blockSignals(False)
+
         # Aggiorna il testo dell'anteprima sul canvas
         self.canvas.set_clip_text(clip["text"])
 
@@ -1530,6 +1588,91 @@ class SubtitleDrawer(QDialog):
 
         self.lbl_status.setText("🔗 Stile applicato a tutte le clip dello script!")
         QMessageBox.information(self, "Stile Propagato", "Stile e impostazioni grafiche applicati con successo a tutte le clip di questa storia.")
+
+    def _populate_story_selector(self):
+        """Popola il selettore storie con gli script disponibili nel database."""
+        if not hasattr(self, "cmb_story_selector"):
+            return
+        self.cmb_story_selector.blockSignals(True)
+        self.cmb_story_selector.clear()
+        selected_idx = 0
+        cur_id = self.script_data.get("id")
+        for i, s in enumerate(self.available_scripts):
+            s_id = s.get("id")
+            title = s.get("context_title", f"Script #{s_id}")
+            w_count = s.get("word_count", len(s.get("raw_text", "").split()))
+            self.cmb_story_selector.addItem(f"#{s_id}: {title} ({w_count} parole)", s_id)
+            if cur_id is not None and s_id == cur_id:
+                selected_idx = i
+
+        if not self.available_scripts:
+            self.cmb_story_selector.addItem(self.script_data.get("context_title", "Demo Story"), None)
+        else:
+            self.cmb_story_selector.setCurrentIndex(selected_idx)
+        self.cmb_story_selector.blockSignals(False)
+
+    def _on_story_selected(self, index: int):
+        """Gestisce il cambio della storia attiva dal dropdown."""
+        if index < 0 or index >= len(self.available_scripts):
+            return
+        chosen = self.available_scripts[index]
+        if self.script_data.get("id") == chosen.get("id") and self.clips:
+            return
+
+        self._save_ui_to_current_clip_data()
+        self.script_data = copy.deepcopy(chosen)
+        self.timing_config["custom_chunks"] = []
+        self._init_clips_model()
+        self._populate_clip_selector()
+        self._load_clip_data_to_ui(0)
+        self.lbl_status.setText(f"📖 Storia #{chosen.get('id')} caricata: {len(self.clips)} clip disponibili.")
+
+    def _populate_clip_selector(self):
+        """Popola il selettore a tendina delle clip per la storia corrente."""
+        if not hasattr(self, "cmb_clip_selector"):
+            return
+        self.cmb_clip_selector.blockSignals(True)
+        self.cmb_clip_selector.clear()
+        tot = len(self.clips)
+        for i, clip in enumerate(self.clips):
+            txt = clip["text"].replace("\n", " ").strip()
+            preview = (txt[:32] + "...") if len(txt) > 32 else txt
+            w_count = len(txt.split())
+            self.cmb_clip_selector.addItem(f"Clip {i + 1}/{tot}: \"{preview}\" ({w_count}w)", i)
+        if 0 <= self.current_clip_idx < tot:
+            self.cmb_clip_selector.setCurrentIndex(self.current_clip_idx)
+        self.cmb_clip_selector.blockSignals(False)
+
+    def _on_clip_combo_changed(self, idx: int):
+        """Chiamato quando l'utente seleziona una clip dal menu a tendina."""
+        if idx < 0 or idx >= len(self.clips) or idx == self.current_clip_idx:
+            return
+        self._save_ui_to_current_clip_data()
+        self._load_clip_data_to_ui(idx)
+        self.lbl_status.setText(f"Clip #{idx + 1} attiva.")
+
+    def _on_add_clip(self):
+        """Aggiunge una nuova clip alla storia corrente."""
+        self._save_ui_to_current_clip_data()
+        new_idx = len(self.clips)
+        title = self.script_data.get("context_title", "Short Story")
+        new_clip = {
+            "clip_idx": new_idx,
+            "part_num": new_idx + 1,
+            "text": f"Nuovo segmento narrativo per la clip {new_idx + 1}...",
+            "title": f"{title} part.{new_idx + 1}"
+        }
+        self.clips.append(new_clip)
+
+        # Inizializza le specifiche della nuova clip copiando lo stile corrente
+        base_specs = copy.deepcopy(self.clip_styles[self.current_clip_idx])
+        base_specs["intro"]["text"] = new_clip["title"]
+        base_specs["outro"]["text"] = "Follow for more!"
+        self.clip_styles[new_idx] = base_specs
+
+        self._populate_clip_selector()
+        self._load_clip_data_to_ui(new_idx)
+        self.lbl_status.setText(f"➕ Nuova Clip #{new_idx + 1} aggiunta con successo!")
 
     def _on_scrub_slider_changed(self, val: int):
         """Aggiorna la timeline di scrubbing e programma l'estrazione del fotogramma reale."""
@@ -1802,6 +1945,7 @@ class SubtitleDrawer(QDialog):
         # Liste di testo intro e outro per ogni clip
         custom_intros = [self.clip_styles[i]["intro"]["text"] for i in range(len(self.clips))]
         custom_outros = [{"spoken": self.clip_styles[i]["outro"]["text"], "banner": self.clip_styles[i]["outro"]["text"]} for i in range(len(self.clips))]
+        custom_chunks = [self.clips[i]["text"] for i in range(len(self.clips))]
 
         result = dict(cur_sub)
         result["intro_style"] = dict(cur_intro)
@@ -1809,6 +1953,10 @@ class SubtitleDrawer(QDialog):
         result["clip_settings"] = copy.deepcopy(self.clip_styles)
         result["custom_intros"] = custom_intros
         result["custom_outros"] = custom_outros
+        result["custom_chunks"] = custom_chunks
+        result["num_clips"] = len(self.clips)
+        if self.script_data and "id" in self.script_data:
+            result["selected_script_id"] = self.script_data["id"]
         return result
 
     def closeEvent(self, event):

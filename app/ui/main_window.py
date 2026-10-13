@@ -601,7 +601,34 @@ class MainWindow(QMainWindow):
         self.active_script_id = script_data.get("id")
         self.active_script_data = script_data
         self._rendered_complete = False
+
+        # Auto-chunking se custom_chunks non è ancora presente
+        raw_text = script_data.get("raw_text") or script_data.get("full_text", "")
+        if raw_text and ("custom_chunks" not in script_data or not script_data["custom_chunks"]):
+            try:
+                from app.core.discourse_chunker import DiscourseCoherenceChunker
+                chunker = DiscourseCoherenceChunker()
+                chunks = chunker.chunk_story_coherently(raw_text)
+                if chunks:
+                    script_data["custom_chunks"] = chunks
+                    script_data["num_clips"] = len(chunks)
+                    self.active_timing_config["custom_chunks"] = chunks
+                    self.active_timing_config["num_clips"] = len(chunks)
+            except Exception as e_ch:
+                log.warning(f"Errore chunking automatico in set_active_script: {e_ch}")
+
         self.card_script.set_script(script_data)
+        wps = float(self.active_timing_config.get("wps", DEFAULT_WPS))
+        num_clips = self.active_timing_config.get("num_clips") or script_data.get("num_clips")
+        tot_dur = self.active_timing_config.get("tot_video_sec") or script_data.get("est_duration_sec")
+        self.card_script.update_metrics(
+            wps=wps,
+            num_clips=num_clips,
+            total_duration_sec=tot_dur,
+            word_count=script_data.get("word_count"),
+            char_count=script_data.get("char_count")
+        )
+
         self.log_event(f"Script attivo impostato: \"{script_data.get('context_title')}\" (ID: #{self.active_script_id})")
         self._save_session_state()
 
@@ -944,6 +971,7 @@ class MainWindow(QMainWindow):
             script_data=self.active_script_data,
             timing_config=self.active_timing_config,
             video_file_path=video_file_path,
+            script_repo=self.script_repo,
             parent=self
         )
         drawer.settings_saved.connect(self._on_subtitle_settings_saved)
@@ -956,6 +984,23 @@ class MainWindow(QMainWindow):
             self.active_timing_config["custom_intros"] = settings["custom_intros"]
         if "custom_outros" in settings:
             self.active_timing_config["custom_outros"] = settings["custom_outros"]
+        if "custom_chunks" in settings and settings["custom_chunks"]:
+            self.active_timing_config["custom_chunks"] = settings["custom_chunks"]
+            self.active_timing_config["num_clips"] = len(settings["custom_chunks"])
+            if self.active_script_data:
+                self.active_script_data["custom_chunks"] = settings["custom_chunks"]
+                self.active_script_data["num_clips"] = len(settings["custom_chunks"])
+                self.card_script.update_metrics(num_clips=len(settings["custom_chunks"]))
+
+        # Se l'utente ha cambiato storia all'interno del drawer:
+        sel_id = settings.get("selected_script_id")
+        if sel_id is not None and sel_id != self.active_script_id and self.script_repo:
+            new_script = self.script_repo.get_script_by_id(sel_id)
+            if new_script:
+                if "custom_chunks" in settings:
+                    new_script["custom_chunks"] = settings["custom_chunks"]
+                self.set_active_script(new_script)
+
         self._save_session_state()
         self.log_event(f"Tipografia sottotitoli aggiornata: {settings.get('font_name', '')} {settings.get('font_size', '')}pt ({settings.get('animation_style', 'WORD_POP')})")
 
