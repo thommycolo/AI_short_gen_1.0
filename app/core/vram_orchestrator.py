@@ -390,6 +390,23 @@ class VRAMLifecycleOrchestrator:
                 # --- FASE 2: ALLINEAMENTO WHISPER SULLA NARRAZIONE & ASS SUBTITLES ---
                 word_events = self.run_phase_b_whisper_isolated(temp_narr_wav, part_text, narr_dur)
 
+                # Configurazione di stile specifica per la singola clip (se presente)
+                clip_specific_sub_cfg = dict(sub_cfg)
+                clip_settings_map = sub_cfg.get("clip_settings", {})
+                if part_idx in clip_settings_map or str(part_idx) in clip_settings_map:
+                    part_custom = clip_settings_map.get(part_idx) or clip_settings_map.get(str(part_idx))
+                    if isinstance(part_custom, dict):
+                        if "subtitle" in part_custom:
+                            clip_specific_sub_cfg.update(part_custom["subtitle"])
+                        if "intro" in part_custom:
+                            clip_specific_sub_cfg["intro_style"] = part_custom["intro"]
+                            if part_custom["intro"].get("text"):
+                                intro_title = part_custom["intro"]["text"]
+                        if "outro" in part_custom:
+                            clip_specific_sub_cfg["outro_style"] = part_custom["outro"]
+                            if part_custom["outro"].get("text"):
+                                outro_banner = part_custom["outro"]["text"]
+
                 ass_path = str(CACHE_DIR / f"temp_subs_{story_id}_p{part_num}.ass")
                 self.subtitle_gen.generate_ass(
                     word_events=word_events,
@@ -398,7 +415,7 @@ class VRAMLifecycleOrchestrator:
                     part_num=part_num,
                     total_parts=total_parts,
                     total_video_duration=video_needed_dur,
-                    style_config=sub_cfg,
+                    style_config=clip_specific_sub_cfg,
                     narration_duration=narr_dur,
                     outro_cta_text=outro_banner
                 )

@@ -912,6 +912,7 @@ class MainWindow(QMainWindow):
                         ffmpeg, "-y",
                         "-ss", "2.0",
                         "-i", str(vid_path),
+                        "-vf", f"scale={CANVAS_WIDTH}:{CANVAS_HEIGHT}:force_original_aspect_ratio=increase,crop={CANVAS_WIDTH}:{CANVAS_HEIGHT}",
                         "-vframes", "1",
                         "-q:v", "2",
                         str(frame_cache)
@@ -925,11 +926,24 @@ class MainWindow(QMainWindow):
 
     def _open_subtitle_drawer(self):
         frame_path = self._get_or_extract_preview_frame()
+        video_file_path = None
+        if self.preferred_video_source_id:
+            src = self.video_pool.get_source_by_id(self.preferred_video_source_id)
+            if src and src.get("file_path") and os.path.exists(src["file_path"]):
+                video_file_path = src["file_path"]
+        if not video_file_path:
+            sources = self.video_pool.get_sources(category=self.active_video_category, available_only=False)
+            if sources and sources[0].get("file_path") and os.path.exists(sources[0]["file_path"]):
+                video_file_path = sources[0]["file_path"]
+
         drawer = SubtitleDrawer(
             self.preset_mgr,
             current_settings=self.active_subtitle_config,
             video_frame_path=frame_path,
             video_pool_mgr=self.video_pool,
+            script_data=self.active_script_data,
+            timing_config=self.active_timing_config,
+            video_file_path=video_file_path,
             parent=self
         )
         drawer.settings_saved.connect(self._on_subtitle_settings_saved)
@@ -938,8 +952,12 @@ class MainWindow(QMainWindow):
 
     def _on_subtitle_settings_saved(self, settings: dict):
         self.active_subtitle_config.update(settings)
+        if "custom_intros" in settings:
+            self.active_timing_config["custom_intros"] = settings["custom_intros"]
+        if "custom_outros" in settings:
+            self.active_timing_config["custom_outros"] = settings["custom_outros"]
         self._save_session_state()
-        self.log_event(f"Tipografia sottotitoli aggiornata: {settings.get('font_name', '')} {settings.get('font_size', '')}pt")
+        self.log_event(f"Tipografia sottotitoli aggiornata: {settings.get('font_name', '')} {settings.get('font_size', '')}pt ({settings.get('animation_style', 'WORD_POP')})")
 
     def _on_voice_changed(self, voice_dict: dict):
         self.active_voice_config.update(voice_dict)

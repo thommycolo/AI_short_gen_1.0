@@ -81,7 +81,10 @@ class PreviewPlayerWidget(QFrame):
         if Path(image_path).exists():
             pix = QPixmap(image_path)
             if not pix.isNull():
-                self.preview_pixmap = pix.scaled(270, 480, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                scaled = pix.scaled(270, 480, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                crop_x = max(0, (scaled.width() - 270) // 2)
+                crop_y = max(0, (scaled.height() - 480) // 2)
+                self.preview_pixmap = scaled.copy(crop_x, crop_y, 270, 480)
                 self.screen_frame.update()
 
     def set_duration(self, duration_sec: float):
