@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QWidget, QSlider, QCheckBox, QComboBox, QRadioButton,
     QButtonGroup, QInputDialog, QMessageBox, QFileDialog, QColorDialog,
-    QTabWidget, QLineEdit
+    QTabWidget, QLineEdit, QTextEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import (
@@ -72,7 +72,7 @@ class SubtitleCanvasWidget(QWidget):
         self.intro_box_enabled = True
         self.intro_box_color = "#14171E"
         self.intro_box_opacity = 85
-        self.intro_margin_v = 0 # 0 = centro schermo
+        self.intro_margin_v = 960 # 960 = centro schermo su 1920
 
         # Stile Titolo di Coda (Outro CTA)
         self.outro_enabled = True
@@ -87,7 +87,7 @@ class SubtitleCanvasWidget(QWidget):
         self.outro_box_enabled = True
         self.outro_box_color = "#14171E"
         self.outro_box_opacity = 85
-        self.outro_margin_v = 0 # 0 = centro schermo
+        self.outro_margin_v = 960 # 960 = centro schermo su 1920
 
         # Overlays
         self.show_safe_zones = True
@@ -228,7 +228,7 @@ class SubtitleCanvasWidget(QWidget):
             self._render_subtitles_animation(painter)
 
     def _render_intro_banner(self, painter: QPainter):
-        """Render esatto del fotogramma del Titolo di Testa."""
+        """Render esatto del fotogramma del Titolo di Testa con supporto multiriga e posizionamento verticale."""
         banner_text = self.intro_text or "TITOLO INTRO"
         if self.intro_is_all_caps:
             banner_text = banner_text.upper()
@@ -238,20 +238,28 @@ class SubtitleCanvasWidget(QWidget):
         font = QFont(self.intro_font_family, scaled_size, QFont.Bold)
         painter.setFont(font)
         fm = painter.fontMetrics()
-        t_w = fm.horizontalAdvance(banner_text)
-        t_h = fm.height()
 
-        y_pos = int((1920 - self.intro_margin_v) * scale_ratio) if self.intro_margin_v > 0 else 220
-        y_pos = max(60, min(420, y_pos))
+        lines = [line.strip() for line in banner_text.splitlines() if line.strip()]
+        if not lines:
+            lines = ["TITOLO INTRO"]
+
+        line_h = fm.height()
+        line_spacing = 4
+        total_text_h = len(lines) * line_h + (len(lines) - 1) * line_spacing
+        max_line_w = max(fm.horizontalAdvance(l) for l in lines)
+
+        margin_v = self.intro_margin_v if self.intro_margin_v > 0 else 960
+        y_pos = int((1920 - margin_v) * scale_ratio)
+        y_pos = max(35 + total_text_h // 2, min(450 - total_text_h // 2, y_pos))
 
         # Box Sfondo Banner (se abilitato)
         if self.intro_box_enabled:
             pad_x = 16
             pad_y = 8
-            b_w = min(254, t_w + pad_x * 2)
-            b_h = t_h + pad_y * 2
+            b_w = min(254, max_line_w + pad_x * 2)
+            b_h = total_text_h + pad_y * 2
             b_x = (270 - b_w) // 2
-            b_y = y_pos - t_h // 2 - pad_y
+            b_y = y_pos - b_h // 2
 
             box_col = QColor(self.intro_box_color)
             box_col.setAlpha(int(255 * (self.intro_box_opacity / 100.0)))
@@ -259,31 +267,34 @@ class SubtitleCanvasWidget(QWidget):
             painter.setPen(QPen(QColor(self.intro_outline_color), 1.5))
             painter.drawRoundedRect(b_x, b_y, b_w, b_h, 6, 6)
 
-        # Disegno Testo con Contorno e Ombra
-        x_pos = max(10, (270 - t_w) // 2)
-        baseline_y = y_pos + t_h // 4
+        # Disegno delle singole righe di testo
+        start_y = y_pos - total_text_h // 2 + fm.ascent()
+        for i, line in enumerate(lines):
+            cur_line_y = start_y + i * (line_h + line_spacing)
+            l_w = fm.horizontalAdvance(line)
+            x_pos = max(10, (270 - l_w) // 2)
 
-        path = QPainterPath()
-        path.addText(x_pos, baseline_y, font, banner_text)
+            path = QPainterPath()
+            path.addText(x_pos, cur_line_y, font, line)
 
-        if self.intro_shadow_radius > 0:
-            shadow_path = QPainterPath()
-            s_off = max(1, int(self.intro_shadow_radius * 0.45))
-            shadow_path.addText(x_pos + s_off, baseline_y + s_off, font, banner_text)
-            painter.fillPath(shadow_path, QBrush(QColor(0, 0, 0, 180)))
+            if self.intro_shadow_radius > 0:
+                shadow_path = QPainterPath()
+                s_off = max(1, int(self.intro_shadow_radius * 0.45))
+                shadow_path.addText(x_pos + s_off, cur_line_y + s_off, font, line)
+                painter.fillPath(shadow_path, QBrush(QColor(0, 0, 0, 180)))
 
-        if self.intro_outline_width > 0:
-            pen = QPen(QColor(self.intro_outline_color), max(1.5, self.intro_outline_width * 0.45))
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.strokePath(path, pen)
+            if self.intro_outline_width > 0:
+                pen = QPen(QColor(self.intro_outline_color), max(1.5, self.intro_outline_width * 0.45))
+                pen.setJoinStyle(Qt.RoundJoin)
+                painter.strokePath(path, pen)
 
-        painter.fillPath(path, QBrush(QColor(self.intro_color)))
+            painter.fillPath(path, QBrush(QColor(self.intro_color)))
 
         # Badge modalità
         self._draw_mode_badge(painter, "🎬 TITOLO DI TESTA (0.0s - 1.5s)", "#6B82A6")
 
     def _render_outro_banner(self, painter: QPainter):
-        """Render esatto del fotogramma del Titolo di Coda."""
+        """Render esatto del fotogramma del Titolo di Coda con supporto multiriga e posizionamento verticale."""
         banner_text = self.outro_text or "FOLLOW FOR MORE!"
         if self.outro_is_all_caps:
             banner_text = banner_text.upper()
@@ -293,20 +304,28 @@ class SubtitleCanvasWidget(QWidget):
         font = QFont(self.outro_font_family, scaled_size, QFont.Bold)
         painter.setFont(font)
         fm = painter.fontMetrics()
-        t_w = fm.horizontalAdvance(banner_text)
-        t_h = fm.height()
 
-        y_pos = int((1920 - self.outro_margin_v) * scale_ratio) if self.outro_margin_v > 0 else 235
-        y_pos = max(60, min(420, y_pos))
+        lines = [line.strip() for line in banner_text.splitlines() if line.strip()]
+        if not lines:
+            lines = ["FOLLOW FOR MORE!"]
+
+        line_h = fm.height()
+        line_spacing = 4
+        total_text_h = len(lines) * line_h + (len(lines) - 1) * line_spacing
+        max_line_w = max(fm.horizontalAdvance(l) for l in lines)
+
+        margin_v = self.outro_margin_v if self.outro_margin_v > 0 else 960
+        y_pos = int((1920 - margin_v) * scale_ratio)
+        y_pos = max(35 + total_text_h // 2, min(450 - total_text_h // 2, y_pos))
 
         # Box Sfondo Banner (se abilitato)
         if self.outro_box_enabled:
             pad_x = 16
             pad_y = 8
-            b_w = min(254, t_w + pad_x * 2)
-            b_h = t_h + pad_y * 2
+            b_w = min(254, max_line_w + pad_x * 2)
+            b_h = total_text_h + pad_y * 2
             b_x = (270 - b_w) // 2
-            b_y = y_pos - t_h // 2 - pad_y
+            b_y = y_pos - b_h // 2
 
             box_col = QColor(self.outro_box_color)
             box_col.setAlpha(int(255 * (self.outro_box_opacity / 100.0)))
@@ -314,24 +333,27 @@ class SubtitleCanvasWidget(QWidget):
             painter.setPen(QPen(QColor(self.outro_outline_color), 1.5))
             painter.drawRoundedRect(b_x, b_y, b_w, b_h, 6, 6)
 
-        x_pos = max(10, (270 - t_w) // 2)
-        baseline_y = y_pos + t_h // 4
+        start_y = y_pos - total_text_h // 2 + fm.ascent()
+        for i, line in enumerate(lines):
+            cur_line_y = start_y + i * (line_h + line_spacing)
+            l_w = fm.horizontalAdvance(line)
+            x_pos = max(10, (270 - l_w) // 2)
 
-        path = QPainterPath()
-        path.addText(x_pos, baseline_y, font, banner_text)
+            path = QPainterPath()
+            path.addText(x_pos, cur_line_y, font, line)
 
-        if self.outro_shadow_radius > 0:
-            shadow_path = QPainterPath()
-            s_off = max(1, int(self.outro_shadow_radius * 0.45))
-            shadow_path.addText(x_pos + s_off, baseline_y + s_off, font, banner_text)
-            painter.fillPath(shadow_path, QBrush(QColor(0, 0, 0, 180)))
+            if self.outro_shadow_radius > 0:
+                shadow_path = QPainterPath()
+                s_off = max(1, int(self.outro_shadow_radius * 0.45))
+                shadow_path.addText(x_pos + s_off, cur_line_y + s_off, font, line)
+                painter.fillPath(shadow_path, QBrush(QColor(0, 0, 0, 180)))
 
-        if self.outro_outline_width > 0:
-            pen = QPen(QColor(self.outro_outline_color), max(1.5, self.outro_outline_width * 0.45))
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.strokePath(path, pen)
+            if self.outro_outline_width > 0:
+                pen = QPen(QColor(self.outro_outline_color), max(1.5, self.outro_outline_width * 0.45))
+                pen.setJoinStyle(Qt.RoundJoin)
+                painter.strokePath(path, pen)
 
-        painter.fillPath(path, QBrush(QColor(self.outro_color)))
+            painter.fillPath(path, QBrush(QColor(self.outro_color)))
 
         # Badge modalità
         self._draw_mode_badge(painter, "🏁 TITOLO DI CODA (OUTRO CTA)", "#BFA175")
@@ -528,7 +550,6 @@ class SubtitleDrawer(QDialog):
 
         self._init_ui()
         self._populate_story_selector()
-        self._populate_clip_selector()
         self._load_available_fonts()
         self._load_presets_combo()
         self._load_clip_data_to_ui(self.current_clip_idx)
@@ -626,7 +647,7 @@ class SubtitleDrawer(QDialog):
                         "box_enabled": True,
                         "box_color_hex": "#14171E",
                         "box_opacity": 85,
-                        "margin_v": 0 # 0 = centro schermo
+                        "margin_v": int(self.current_settings.get("intro_margin_v", 960))
                     },
                     "outro": {
                         "enabled": True,
@@ -641,7 +662,7 @@ class SubtitleDrawer(QDialog):
                         "box_enabled": True,
                         "box_color_hex": "#14171E",
                         "box_opacity": 85,
-                        "margin_v": 0 # 0 = centro schermo
+                        "margin_v": int(self.current_settings.get("outro_margin_v", 960))
                     }
                 }
 
@@ -687,14 +708,8 @@ class SubtitleDrawer(QDialog):
         clip_nav_layout.addWidget(self.btn_prev_clip)
 
         self.lbl_clip_badge = QLabel("🎬 Clip 1 di 1")
-        self.lbl_clip_badge.setStyleSheet("font-size: 12px; font-weight: 700; color: #DCE0EA; padding: 0 4px;")
+        self.lbl_clip_badge.setStyleSheet("font-size: 12px; font-weight: 700; color: #DCE0EA; padding: 0 8px;")
         clip_nav_layout.addWidget(self.lbl_clip_badge)
-
-        self.cmb_clip_selector = QComboBox()
-        self.cmb_clip_selector.setMinimumWidth(240)
-        self.cmb_clip_selector.setToolTip("Seleziona direttamente la clip desiderata")
-        self.cmb_clip_selector.currentIndexChanged.connect(self._on_clip_combo_changed)
-        clip_nav_layout.addWidget(self.cmb_clip_selector)
 
         self.btn_next_clip = QPushButton("Clip Succ. ▶")
         self.btn_next_clip.setToolTip("Passa alla clip successiva di questo testo")
@@ -1041,10 +1056,10 @@ class SubtitleDrawer(QDialog):
         l_pos.addWidget(lbl_pos_t)
 
         row_y = QHBoxLayout()
-        lbl_y = QLabel("Altezza Testo (Y Fondo):")
-        lbl_y.setFixedWidth(140)
+        lbl_y = QLabel("Altezza Testo:")
+        lbl_y.setFixedWidth(130)
         self.sld_y = QSlider(Qt.Horizontal)
-        self.sld_y.setRange(50, 800)
+        self.sld_y.setRange(0, 2000)
         self.sld_y.setValue(DEFAULT_MARGIN_V)
         self.lbl_val_y = QLabel(f"{DEFAULT_MARGIN_V} px")
         self.lbl_val_y.setFixedWidth(55)
@@ -1088,8 +1103,9 @@ class SubtitleDrawer(QDialog):
         row_tx = QHBoxLayout()
         lbl_tx = QLabel("Testo Titolo Intro:")
         lbl_tx.setFixedWidth(130)
-        self.txt_intro_title = QLineEdit()
-        self.txt_intro_title.setPlaceholderText("Es. Cosmos_BlackHoles part.1")
+        self.txt_intro_title = QTextEdit()
+        self.txt_intro_title.setMaximumHeight(70)
+        self.txt_intro_title.setPlaceholderText("Es. Cosmos_BlackHoles\npart.1 (puoi andare a capo con Invio)")
         self.txt_intro_title.textChanged.connect(self._on_intro_control_changed)
         row_tx.addWidget(lbl_tx)
         row_tx.addWidget(self.txt_intro_title)
@@ -1195,8 +1211,30 @@ class SubtitleDrawer(QDialog):
         row_op.addWidget(self.sld_intro_opacity)
         row_op.addWidget(self.lbl_val_intro_op)
         l_col.addLayout(row_op)
-
         l.addWidget(c_col)
+
+        # Card 4: Posizione Verticale Indipendente
+        c_intro_pos = QFrame()
+        c_intro_pos.setObjectName("CardSurface")
+        l_intro_pos = QVBoxLayout(c_intro_pos)
+        lbl_intro_pos_t = QLabel("POSIZIONE VERTICALE:")
+        lbl_intro_pos_t.setStyleSheet("font-size: 12px; font-weight: 700; color: #6B82A6;")
+        l_intro_pos.addWidget(lbl_intro_pos_t)
+
+        row_intro_y = QHBoxLayout()
+        lbl_intro_y = QLabel("Altezza Titolo:")
+        lbl_intro_y.setFixedWidth(130)
+        self.sld_intro_y = QSlider(Qt.Horizontal)
+        self.sld_intro_y.setRange(0, 2000)
+        self.sld_intro_y.setValue(960)
+        self.lbl_val_intro_y = QLabel("960 px")
+        self.lbl_val_intro_y.setFixedWidth(55)
+        self.sld_intro_y.valueChanged.connect(lambda v: (self.lbl_val_intro_y.setText(f"{v} px"), self._on_intro_control_changed()))
+        row_intro_y.addWidget(lbl_intro_y)
+        row_intro_y.addWidget(self.sld_intro_y)
+        row_intro_y.addWidget(self.lbl_val_intro_y)
+        l_intro_pos.addLayout(row_intro_y)
+        l.addWidget(c_intro_pos)
         scroll.setWidget(container)
         return scroll
 
@@ -1225,8 +1263,9 @@ class SubtitleDrawer(QDialog):
         row_tx = QHBoxLayout()
         lbl_tx = QLabel("Testo Outro a Schermo:")
         lbl_tx.setFixedWidth(130)
-        self.txt_outro_title = QLineEdit()
-        self.txt_outro_title.setPlaceholderText("Es. Follow for part.2 o Follow for more!")
+        self.txt_outro_title = QTextEdit()
+        self.txt_outro_title.setMaximumHeight(70)
+        self.txt_outro_title.setPlaceholderText("Es. Follow for part.2\no Follow for more! (puoi andare a capo con Invio)")
         self.txt_outro_title.textChanged.connect(self._on_outro_control_changed)
         row_tx.addWidget(lbl_tx)
         row_tx.addWidget(self.txt_outro_title)
@@ -1332,8 +1371,30 @@ class SubtitleDrawer(QDialog):
         row_op.addWidget(self.sld_outro_opacity)
         row_op.addWidget(self.lbl_val_outro_op)
         l_col.addLayout(row_op)
-
         l.addWidget(c_col)
+
+        # Card 4: Posizione Verticale Indipendente
+        c_outro_pos = QFrame()
+        c_outro_pos.setObjectName("CardSurface")
+        l_outro_pos = QVBoxLayout(c_outro_pos)
+        lbl_outro_pos_t = QLabel("POSIZIONE VERTICALE:")
+        lbl_outro_pos_t.setStyleSheet("font-size: 12px; font-weight: 700; color: #6B82A6;")
+        l_outro_pos.addWidget(lbl_outro_pos_t)
+
+        row_outro_y = QHBoxLayout()
+        lbl_outro_y = QLabel("Altezza Titolo:")
+        lbl_outro_y.setFixedWidth(130)
+        self.sld_outro_y = QSlider(Qt.Horizontal)
+        self.sld_outro_y.setRange(0, 2000)
+        self.sld_outro_y.setValue(960)
+        self.lbl_val_outro_y = QLabel("960 px")
+        self.lbl_val_outro_y.setFixedWidth(55)
+        self.sld_outro_y.valueChanged.connect(lambda v: (self.lbl_val_outro_y.setText(f"{v} px"), self._on_outro_control_changed()))
+        row_outro_y.addWidget(lbl_outro_y)
+        row_outro_y.addWidget(self.sld_outro_y)
+        row_outro_y.addWidget(self.lbl_val_outro_y)
+        l_outro_pos.addLayout(row_outro_y)
+        l.addWidget(c_outro_pos)
         scroll.setWidget(container)
         return scroll
 
@@ -1384,11 +1445,6 @@ class SubtitleDrawer(QDialog):
         self.btn_prev_clip.setEnabled(clip_idx > 0)
         self.btn_next_clip.setEnabled(clip_idx < total_clips - 1)
 
-        if hasattr(self, "cmb_clip_selector") and self.cmb_clip_selector.currentIndex() != clip_idx:
-            self.cmb_clip_selector.blockSignals(True)
-            self.cmb_clip_selector.setCurrentIndex(clip_idx)
-            self.cmb_clip_selector.blockSignals(False)
-
         # Aggiorna il testo dell'anteprima sul canvas
         self.canvas.set_clip_text(clip["text"])
 
@@ -1425,7 +1481,7 @@ class SubtitleDrawer(QDialog):
 
         # Intro UI
         self.chk_intro_enable.setChecked(bool(intro_s.get("enabled", True)))
-        self.txt_intro_title.setText(intro_s.get("text", clip["title"]))
+        self.txt_intro_title.setPlainText(intro_s.get("text", clip["title"]))
         idx_if = self.cmb_intro_font.findText(intro_s.get("font_name", DEFAULT_FONT_NAME))
         if idx_if >= 0:
             self.cmb_intro_font.setCurrentIndex(idx_if)
@@ -1435,10 +1491,11 @@ class SubtitleDrawer(QDialog):
         self.sld_intro_edge.setValue(int(intro_s.get("outline_width", 6)))
         self.chk_intro_box.setChecked(bool(intro_s.get("box_enabled", True)))
         self.sld_intro_opacity.setValue(int(intro_s.get("box_opacity", 85)))
+        self.sld_intro_y.setValue(int(intro_s.get("margin_v", 960)))
 
         # Outro UI
         self.chk_outro_enable.setChecked(bool(outro_s.get("enabled", True)))
-        self.txt_outro_title.setText(outro_s.get("text", "Follow for more!"))
+        self.txt_outro_title.setPlainText(outro_s.get("text", "Follow for more!"))
         idx_of = self.cmb_outro_font.findText(outro_s.get("font_name", DEFAULT_FONT_NAME))
         if idx_of >= 0:
             self.cmb_outro_font.setCurrentIndex(idx_of)
@@ -1448,6 +1505,7 @@ class SubtitleDrawer(QDialog):
         self.sld_outro_edge.setValue(int(outro_s.get("outline_width", 7)))
         self.chk_outro_box.setChecked(bool(outro_s.get("box_enabled", True)))
         self.sld_outro_opacity.setValue(int(outro_s.get("box_opacity", 85)))
+        self.sld_outro_y.setValue(int(outro_s.get("margin_v", 960)))
 
         # Aggiorna il canvas monitor
         self.canvas.update_subtitle_style(sub_s)
@@ -1486,7 +1544,7 @@ class SubtitleDrawer(QDialog):
             },
             "intro": {
                 "enabled": self.chk_intro_enable.isChecked(),
-                "text": self.txt_intro_title.text().strip(),
+                "text": self.txt_intro_title.toPlainText().strip(),
                 "font_name": self.cmb_intro_font.currentText(),
                 "font_size": self.sld_intro_size.value(),
                 "is_all_caps": 1 if self.cmb_intro_case.currentIndex() == 0 else 0,
@@ -1497,11 +1555,11 @@ class SubtitleDrawer(QDialog):
                 "box_enabled": self.chk_intro_box.isChecked(),
                 "box_color_hex": "#14171E",
                 "box_opacity": self.sld_intro_opacity.value(),
-                "margin_v": 0
+                "margin_v": self.sld_intro_y.value()
             },
             "outro": {
                 "enabled": self.chk_outro_enable.isChecked(),
-                "text": self.txt_outro_title.text().strip(),
+                "text": self.txt_outro_title.toPlainText().strip(),
                 "font_name": self.cmb_outro_font.currentText(),
                 "font_size": self.sld_outro_size.value(),
                 "is_all_caps": 1 if self.cmb_outro_case.currentIndex() == 1 else 0,
@@ -1512,7 +1570,7 @@ class SubtitleDrawer(QDialog):
                 "box_enabled": self.chk_outro_box.isChecked(),
                 "box_color_hex": "#14171E",
                 "box_opacity": self.sld_outro_opacity.value(),
-                "margin_v": 0
+                "margin_v": self.sld_outro_y.value()
             }
         }
 
@@ -1623,33 +1681,8 @@ class SubtitleDrawer(QDialog):
         self.script_data = copy.deepcopy(chosen)
         self.timing_config["custom_chunks"] = []
         self._init_clips_model()
-        self._populate_clip_selector()
         self._load_clip_data_to_ui(0)
         self.lbl_status.setText(f"📖 Storia #{chosen.get('id')} caricata: {len(self.clips)} clip disponibili.")
-
-    def _populate_clip_selector(self):
-        """Popola il selettore a tendina delle clip per la storia corrente."""
-        if not hasattr(self, "cmb_clip_selector"):
-            return
-        self.cmb_clip_selector.blockSignals(True)
-        self.cmb_clip_selector.clear()
-        tot = len(self.clips)
-        for i, clip in enumerate(self.clips):
-            txt = clip["text"].replace("\n", " ").strip()
-            preview = (txt[:32] + "...") if len(txt) > 32 else txt
-            w_count = len(txt.split())
-            self.cmb_clip_selector.addItem(f"Clip {i + 1}/{tot}: \"{preview}\" ({w_count}w)", i)
-        if 0 <= self.current_clip_idx < tot:
-            self.cmb_clip_selector.setCurrentIndex(self.current_clip_idx)
-        self.cmb_clip_selector.blockSignals(False)
-
-    def _on_clip_combo_changed(self, idx: int):
-        """Chiamato quando l'utente seleziona una clip dal menu a tendina."""
-        if idx < 0 or idx >= len(self.clips) or idx == self.current_clip_idx:
-            return
-        self._save_ui_to_current_clip_data()
-        self._load_clip_data_to_ui(idx)
-        self.lbl_status.setText(f"Clip #{idx + 1} attiva.")
 
     def _on_add_clip(self):
         """Aggiunge una nuova clip alla storia corrente."""
@@ -1670,7 +1703,6 @@ class SubtitleDrawer(QDialog):
         base_specs["outro"]["text"] = "Follow for more!"
         self.clip_styles[new_idx] = base_specs
 
-        self._populate_clip_selector()
         self._load_clip_data_to_ui(new_idx)
         self.lbl_status.setText(f"➕ Nuova Clip #{new_idx + 1} aggiunta con successo!")
 
@@ -1926,6 +1958,8 @@ class SubtitleDrawer(QDialog):
         self.sld_edge.setValue(DEFAULT_OUTLINE_WIDTH)
         self.sld_shadow.setValue(DEFAULT_SHADOW_RADIUS)
         self.sld_y.setValue(DEFAULT_MARGIN_V)
+        self.sld_intro_y.setValue(960)
+        self.sld_outro_y.setValue(960)
         self.chk_safe.setChecked(True)
         self._on_control_changed()
 

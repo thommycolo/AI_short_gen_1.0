@@ -181,7 +181,9 @@ class SubtitleGenerator:
         intro_box_enabled = bool(intro_cfg.get("box_enabled", False))
         intro_border_style = 3 if intro_box_enabled else 1
         intro_box_color = hex_to_ass_color(intro_cfg.get("box_color_hex", "#14171E"), alpha="40") if intro_box_enabled else shadow_ass
-        intro_margin_v = int(intro_cfg.get("margin_v", 0))
+        intro_margin_v = int(intro_cfg.get("margin_v", 960))
+        if intro_margin_v <= 0:
+            intro_margin_v = 960
 
         outro_cfg = cfg.get("outro_style", {})
         outro_enabled = bool(outro_cfg.get("enabled", True))
@@ -195,7 +197,9 @@ class SubtitleGenerator:
         outro_box_enabled = bool(outro_cfg.get("box_enabled", False))
         outro_border_style = 3 if outro_box_enabled else 1
         outro_box_color = hex_to_ass_color(outro_cfg.get("box_color_hex", "#14171E"), alpha="40") if outro_box_enabled else shadow_ass
-        outro_margin_v = int(outro_cfg.get("margin_v", 0))
+        outro_margin_v = int(outro_cfg.get("margin_v", 960))
+        if outro_margin_v <= 0:
+            outro_margin_v = 960
 
         # Calcolo durata se non passata esplicitamente
         if not total_video_duration and word_events:
@@ -215,6 +219,8 @@ class SubtitleGenerator:
         intro_title_text = intro_cfg.get("text") or f"{context_title.replace('_', ' ')} part.{part_num}"
         if intro_is_all_caps:
             intro_title_text = intro_title_text.upper()
+        # Converte newlines in \N per ASS
+        intro_title_text = intro_title_text.replace("\r\n", "\\N").replace("\n", "\\N")
 
         if outro_cta_text is None:
             outro_cta_text = outro_cfg.get("text") or (f"Follow for part.{part_num + 1}" if part_num < total_parts else "Follow for more!")
@@ -222,6 +228,8 @@ class SubtitleGenerator:
             outro_cta_text = outro_cfg["text"]
         if outro_is_all_caps:
             outro_cta_text = outro_cta_text.upper()
+        # Converte newlines in \N per ASS
+        outro_cta_text = outro_cta_text.replace("\r\n", "\\N").replace("\n", "\\N")
 
         ass_lines = [
             "[Script Info]",
@@ -233,8 +241,8 @@ class SubtitleGenerator:
             "[V4+ Styles]",
             "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
             f"Style: KaraokeWord,{font_name},{font_size},{primary_ass},{highlight_ass},{outline_ass},{shadow_ass},-1,0,0,0,100,100,1,0,1,{outline_width},{shadow_radius},2,60,60,{margin_v},1",
-            f"Style: TitleBanner,{intro_font},{intro_size},{intro_primary_ass},{highlight_ass},{intro_outline_ass},{intro_box_color},-1,0,0,0,100,100,2,0,{intro_border_style},{intro_out_w},{intro_shadow_r},5,60,60,{intro_margin_v},1",
-            f"Style: OutroBanner,{outro_font},{outro_size},{outro_primary_ass},{highlight_ass},{outro_outline_ass},{outro_box_color},-1,0,0,0,100,100,2,0,{outro_border_style},{outro_out_w},{outro_shadow_r},5,60,60,{outro_margin_v},1",
+            f"Style: TitleBanner,{intro_font},{intro_size},{intro_primary_ass},{highlight_ass},{intro_outline_ass},{intro_box_color},-1,0,0,0,100,100,2,0,{intro_border_style},{intro_out_w},{intro_shadow_r},2,60,60,{intro_margin_v},1",
+            f"Style: OutroBanner,{outro_font},{outro_size},{outro_primary_ass},{highlight_ass},{outro_outline_ass},{outro_box_color},-1,0,0,0,100,100,2,0,{outro_border_style},{outro_out_w},{outro_shadow_r},2,60,60,{outro_margin_v},1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

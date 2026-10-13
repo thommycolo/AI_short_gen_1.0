@@ -65,6 +65,8 @@ app_data/
 *.db-journal
 *.db-wal
 *.log
+*.ass
+tests/output/
 
 # Keep wavs in assets/bgm_safe
 !assets/bgm_safe/*.wav
